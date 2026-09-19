@@ -1,0 +1,1143 @@
+---
+title: "Colocalization of eQTL/pQTL and obstructive sleep apnea signals (merged code)"
+output: html_document
+---
+
+```{r global-options, include=FALSE}
+# Code chunks are shown but not executed: the analysis needs the input files of the
+# study, which are not part of this code repository. Set eval = TRUE (or run a chunk
+# manually) after the paths below have been pointed at your own copy of the data.
+knitr::opts_chunk$set(echo = TRUE, eval = FALSE)
+```
+
+# Colocalization
+
+This document merges the six colocalization scripts of the Colocalization folder. For
+every prioritized gene or protein the cis-region is rebuilt from the eQTL/pQTL summary
+statistics, harmonised against the sleep apnea GWAS and analysed with coloc.abf.
+
+The scripts differ only in the width of the cis window (100 kb, 250 kb and 500 kb) and
+in the molecular layer (gene expression versus plasma protein).
+
+## Notes on the merged code
+
+* Each section below holds one source file of this folder, and the file name is given
+  both in the section heading and in the first comment line of the chunk.
+* Every path that pointed at the analysis tree of the original workstation is rewritten
+  to a short relative path below the placeholder root `Path/`; `Path/datasource/` stands
+  for the input data, `Path/R-4.3.1/bin/` for the R interpreter and
+  `Path/SMR/smr-1.3.1-win-x86_64/` for the SMR executable. Point them at your own
+  installation before running the code.
+* The Chinese comments and chunk titles of the original scripts are given in English;
+  the date of the original document header is not part of this merged file.
+* Shell scripts are kept in their own `bash` chunks.
+
+---
+
+## `eQTL_SleepApnea_colocalization_100kb.Rmd`
+
+```{r "eQTL_SleepApnea_colocalization_100kb.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: eQTL_SleepApnea_colocalization_100kb.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(MendelianRandomization)
+library(dplyr)
+library(data.table)
+library(readxl)
+library(openxlsx)
+library(TwoSampleMR)
+library(plinkbinr)
+library(ieugwasr)
+library(ggplot2)
+library(mr.raps)
+library(coloc)
+library(stringr)
+library(locuscomparer)
+library(WhopGenome)
+
+# ---------------------------------------------------------------------------
+# Chunk: Blood genes
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+setwd("Path/Colocalization/")
+
+mr_res<-read_excel("Path/SMR/Sig_Blood_SleepApnea.xlsx",sheet = "Sheet 1")
+mr_res$ProbeChr<-as.character(mr_res$ProbeChr)
+probe_list<-mr_res$probeID
+gene_list<-mr_res$Gene
+chr_list<-mr_res$ProbeChr
+bp_list<-c(25071848,36621803,153940379,154540257,155200766,168511975,183441638,243219696,243265035,243418352,243419358,24346350,28718938,36825334,54342641,85766288,102972389,135676395,136288806,136633996,157291953,40494796,40498783,48723360,49044495,50654601,50707420,101395319,107241783,108321680,126194762,683230,967344,980785,25378835,31999019,43602825,96143803,112849380,40555204,12250926,72395660,74188309,74310231,74587848,75123401,75157453,76633979,76640868,120628731,8102189,10964214,10967236,11415531,95087632,98270943,136150617,141069497,76970509,104629273,13299345,113258513,28343299,58329958,110011679,110011617,124086646,21141208,36278510,50065415,52043758,1031596,21807080,29466285,30134615,30346375,55496209,27038872,28257170,45569858,79995608,80191563,21083473,4066943,4186418,33071974,41317295,3185331,45079429,18111584,41601209,42017100,42230669,42486032,42526908)
+
+#Create the colocalization summary table
+coloc_res<-data.frame(gene=NA,sleep=NA,nsnps=NA,PPH0=NA,PPH1=NA,PPH2=NA,PPH3=NA,PPH4=NA,snp=NA,position=NA,V.df1=NA,z.df1=NA,r.df1=NA,lABF.df1=NA,V.df2=NA,z.df2=NA,r.df2=NA,lABF.df2=NA,internal.sum.lABF=NA,SNP.PP.H4=NA)
+
+#Load the sleep apnea data and run the preprocessing steps
+load("Path/datasource/GWAS_data/sleepapnoea_FINNGEN_R12_allSNP_hg19.RData")
+SleepApnea <- dat_allSNP_hg19
+rm(dat_allSNP_hg19)
+SleepApnea<- subset(SleepApnea, SleepApnea$FREQ<1)
+SleepApnea<- SleepApnea[order(SleepApnea$P,decreasing = FALSE),]
+SleepApnea<- SleepApnea[!duplicated(SleepApnea$SNP),]
+SleepApnea$CHR<-as.character(SleepApnea$CHR)
+
+for (i in 1:nrow(mr_res)) {
+  gene<-fread(paste("Path/datasource/eQTL_data/Whole_Blood/SleepApnea/blood_",probe_list[i],".txt",sep = ""))
+  gene$Chr<-as.character(gene$Chr)
+  setnames(gene,c("Chr","b","SE","A1","A2"),c("CHR","Beta","se","Effect_Allele","Other_Allele"))
+  
+  sleep_dat<-subset(SleepApnea,SleepApnea$CHR==chr_list[i])
+  sleep_dat<-subset(SleepApnea,SleepApnea$BP<bp_list[i]+100000)
+  sleep_dat<-subset(SleepApnea,SleepApnea$BP>bp_list[i]-100000)
+  
+  #merge
+  merge1<-merge(gene,sleep_dat,by=c("CHR","BP","Effect_Allele","Other_Allele"),
+                suffixes=c(".gene",".sl"))
+  flip_pro <- dplyr::rename(gene,Effect_Allele=Other_Allele,Other_Allele=Effect_Allele)
+  flip_pro$Beta = 0-gene$Beta
+  merge2 <- merge(flip_pro,sleep_dat,by=c("CHR","BP","Effect_Allele","Other_Allele"),suffixes=c(".gene",".sl"))
+  input <- rbind(merge1,merge2)
+  input <- as.data.frame(input)
+  
+  gene_format<-format_data(input,type = "exposure",snps = NULL,header = TRUE,snp_col = "SNP.gene",chr_col = "CHR",pos_col = "BP",effect_allele_col = "Effect_Allele",other_allele_col = "Other_Allele",eaf_col = "Freq",beta_col = "Beta",se_col = "se",pval_col = "p")
+  sleep_format<-format_data(input,type = "outcome",snps = gene_format$SNP,header = TRUE,snp_col = "SNP.sl",chr_col = "CHR",pos_col = "BP",effect_allele_col = "Effect_Allele",other_allele_col = "Other_Allele",eaf_col = "FREQ",beta_col = "BETA",se_col = "BETA_SE",pval_col = "P")
+  har<-harmonise_data(gene_format,sleep_format,action = 1)
+  har<-subset(har,har$mr_keep==TRUE)
+  har$MAF<-ifelse(har$eaf.outcome<0.5,har$eaf.outcome,1-har$eaf.outcome)
+  har$N<-558
+  write.csv(har,paste("har/bloodgene/",gene_list[i],"_SleepApnea_har_100kb.csv",sep = ""))
+
+  result <- coloc.abf(dataset1=list(snp=har$SNP,beta=har$beta.outcome,
+                        varbeta=(har$se.outcome)^2,position=har$pos.outcome,type="cc"),
+                        
+                      dataset2=list(snp=har$SNP,beta=har$beta.exposure,
+                        varbeta=(har$se.exposure)^2,position=har$pos.exposure,
+                        type="quant",N=har$N,MAF=har$MAF)
+                      )
+  
+  need_result=(result$results %>% dplyr::arrange(desc(SNP.PP.H4)))[1,]
+    
+  #record results
+  need_result$gene<-gene_list[i]
+  need_result$sleep<-"SleepApnea"
+  need_result$nsnps<-result[["summary"]][["nsnps"]]
+  need_result$PPH0<-result[["summary"]][["PP.H0.abf"]]
+  need_result$PPH1<-result[["summary"]][["PP.H1.abf"]]
+  need_result$PPH2<-result[["summary"]][["PP.H2.abf"]]
+  need_result$PPH3<-result[["summary"]][["PP.H3.abf"]]
+  need_result$PPH4<-result[["summary"]][["PP.H4.abf"]]
+  
+  coloc_res<-rbind(coloc_res,need_result)
+}
+
+coloc_res<-coloc_res[-1,]
+
+write.xlsx(coloc_res,file = file.path("BloodGene_SleepApnea_colocalization_100kb.xlsx"))
+
+# ---------------------------------------------------------------------------
+# Chunk: Brain genes
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+setwd("Path/Colocalization/")
+
+mr_res<-read_excel("Path/SMR/Sig_Brain_SleepApnea.xlsx",sheet = "Sheet 1")
+mr_res$ProbeChr<-as.character(mr_res$ProbeChr)
+probe_list<-mr_res$probeID
+gene_list<-mr_res$Gene
+chr_list<-mr_res$ProbeChr
+bp_list<-c(1859368,36825334,40428647,47517603,48723360,49027319,49203754,126194762,136557863,183967483,148724993,74267847,74310231,99036545,12219528,95362539,141069497,30389695,107270158,50087403,30134615,89778264,67957903,21166862,4182601,9945689,46999755,57566092,61545758,18257258,29702572,41601209,42095503,42394792,42526908)
+
+#Create the colocalization summary table
+coloc_res<-data.frame(gene=NA,sleep=NA,nsnps=NA,PPH0=NA,PPH1=NA,PPH2=NA,PPH3=NA,PPH4=NA,snp=NA,position=NA,V.df1=NA,z.df1=NA,r.df1=NA,lABF.df1=NA,V.df2=NA,z.df2=NA,r.df2=NA,lABF.df2=NA,internal.sum.lABF=NA,SNP.PP.H4=NA)
+
+#Load the sleep apnea data and run the preprocessing steps
+load("Path/datasource/GWAS_data/sleepapnoea_FINNGEN_R12_allSNP_hg19.RData")
+SleepApnea <- dat_allSNP_hg19
+rm(dat_allSNP_hg19)
+SleepApnea<- subset(SleepApnea, SleepApnea$FREQ<1)
+SleepApnea<- SleepApnea[order(SleepApnea$P,decreasing = FALSE),]
+SleepApnea<- SleepApnea[!duplicated(SleepApnea$SNP),]
+SleepApnea$CHR<-as.character(SleepApnea$CHR)
+
+for (i in 1:nrow(mr_res)) {
+  gene<-fread(paste("Path/datasource/eQTL_data/Brain_Frontal_Cortex_BA9/SleepApnea/brain_",probe_list[i],".txt",sep = ""))
+  gene$Chr<-as.character(gene$Chr)
+  setnames(gene,c("Chr","b","SE","A1","A2"),c("CHR","Beta","se","Effect_Allele","Other_Allele"))
+  
+  sleep_dat<-subset(SleepApnea,SleepApnea$CHR==chr_list[i])
+  sleep_dat<-subset(SleepApnea,SleepApnea$BP<bp_list[i]+100000)
+  sleep_dat<-subset(SleepApnea,SleepApnea$BP>bp_list[i]-100000)
+  
+  #merge
+  merge1<-merge(gene,sleep_dat,by=c("CHR","BP","Effect_Allele","Other_Allele"),
+                suffixes=c(".gene",".sl"))
+  flip_pro <- dplyr::rename(gene,Effect_Allele=Other_Allele,Other_Allele=Effect_Allele)
+  flip_pro$Beta = 0-gene$Beta
+  merge2 <- merge(flip_pro,sleep_dat,by=c("CHR","BP","Effect_Allele","Other_Allele"),suffixes=c(".gene",".sl"))
+  input <- rbind(merge1,merge2)
+  input <- as.data.frame(input)
+  
+  gene_format<-format_data(input,type = "exposure",snps = NULL,header = TRUE,snp_col = "SNP.gene",chr_col = "CHR",pos_col = "BP",effect_allele_col = "Effect_Allele",other_allele_col = "Other_Allele",beta_col = "Beta",se_col = "se",pval_col = "p")
+  sleep_format<-format_data(input,type = "outcome",snps = gene_format$SNP,header = TRUE,snp_col = "SNP.sl",chr_col = "CHR",pos_col = "BP",effect_allele_col = "Effect_Allele",other_allele_col = "Other_Allele",eaf_col = "FREQ",beta_col = "BETA",se_col = "BETA_SE",pval_col = "P")
+  har<-harmonise_data(gene_format,sleep_format,action = 1)
+  har<-subset(har,har$mr_keep==TRUE)
+  har$MAF<-ifelse(har$eaf.outcome<0.5,har$eaf.outcome,1-har$eaf.outcome)
+  har$N<-157
+  write.csv(har,paste("har/braingene/",gene_list[i],"_SleepApnea_har_100kb.csv",sep = ""))
+
+  result <- coloc.abf(dataset1=list(snp=har$SNP,beta=har$beta.outcome,
+                        varbeta=(har$se.outcome)^2,position=har$pos.outcome,type="cc"),
+                        
+                      dataset2=list(snp=har$SNP,beta=har$beta.exposure,
+                        varbeta=(har$se.exposure)^2,position=har$pos.exposure,
+                        type="quant",N=har$N,MAF=har$MAF)
+                      )
+  
+  need_result=(result$results %>% dplyr::arrange(desc(SNP.PP.H4)))[1,]
+    
+  #record results
+  need_result$gene<-gene_list[i]
+  need_result$sleep<-"SleepApnea"
+  need_result$nsnps<-result[["summary"]][["nsnps"]]
+  need_result$PPH0<-result[["summary"]][["PP.H0.abf"]]
+  need_result$PPH1<-result[["summary"]][["PP.H1.abf"]]
+  need_result$PPH2<-result[["summary"]][["PP.H2.abf"]]
+  need_result$PPH3<-result[["summary"]][["PP.H3.abf"]]
+  need_result$PPH4<-result[["summary"]][["PP.H4.abf"]]
+  
+  coloc_res<-rbind(coloc_res,need_result)
+}
+
+coloc_res<-coloc_res[-1,]
+
+write.xlsx(coloc_res,file = file.path("BrainGene_SleepApnea_colocalization_100kb.xlsx"))
+```
+
+## `eQTL_SleepApnea_colocalization_250kb.Rmd`
+
+```{r "eQTL_SleepApnea_colocalization_250kb.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: eQTL_SleepApnea_colocalization_250kb.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(MendelianRandomization)
+library(dplyr)
+library(data.table)
+library(readxl)
+library(openxlsx)
+library(TwoSampleMR)
+library(plinkbinr)
+library(ieugwasr)
+library(ggplot2)
+library(mr.raps)
+library(coloc)
+library(stringr)
+library(locuscomparer)
+library(WhopGenome)
+
+# ---------------------------------------------------------------------------
+# Chunk: Blood genes
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+setwd("Path/Colocalization/")
+
+mr_res<-read_excel("Path/SMR/Sig_Blood_SleepApnea.xlsx",sheet = "Sheet 1")
+mr_res$ProbeChr<-as.character(mr_res$ProbeChr)
+probe_list<-mr_res$probeID
+gene_list<-mr_res$Gene
+chr_list<-mr_res$ProbeChr
+bp_list<-c(25071848,36621803,153940379,154540257,155200766,168511975,183441638,243219696,243265035,243418352,243419358,24346350,28718938,36825334,54342641,85766288,102972389,135676395,136288806,136633996,157291953,40494796,40498783,48723360,49044495,50654601,50707420,101395319,107241783,108321680,126194762,683230,967344,980785,25378835,31999019,43602825,96143803,112849380,40555204,12250926,72395660,74188309,74310231,74587848,75123401,75157453,76633979,76640868,120628731,8102189,10964214,10967236,11415531,95087632,98270943,136150617,141069497,76970509,104629273,13299345,113258513,28343299,58329958,110011679,110011617,124086646,21141208,36278510,50065415,52043758,1031596,21807080,29466285,30134615,30346375,55496209,27038872,28257170,45569858,79995608,80191563,21083473,4066943,4186418,33071974,41317295,3185331,45079429,18111584,41601209,42017100,42230669,42486032,42526908)
+
+#Create the colocalization summary table
+coloc_res<-data.frame(gene=NA,sleep=NA,nsnps=NA,PPH0=NA,PPH1=NA,PPH2=NA,PPH3=NA,PPH4=NA,snp=NA,position=NA,V.df1=NA,z.df1=NA,r.df1=NA,lABF.df1=NA,V.df2=NA,z.df2=NA,r.df2=NA,lABF.df2=NA,internal.sum.lABF=NA,SNP.PP.H4=NA)
+
+#Load the sleep apnea data and run the preprocessing steps
+load("Path/datasource/GWAS_data/sleepapnoea_FINNGEN_R12_allSNP_hg19.RData")
+SleepApnea <- dat_allSNP_hg19
+rm(dat_allSNP_hg19)
+SleepApnea<- subset(SleepApnea, SleepApnea$FREQ<1)
+SleepApnea<- SleepApnea[order(SleepApnea$P,decreasing = FALSE),]
+SleepApnea<- SleepApnea[!duplicated(SleepApnea$SNP),]
+SleepApnea$CHR<-as.character(SleepApnea$CHR)
+
+for (i in 1:nrow(mr_res)) {
+  gene<-fread(paste("Path/datasource/eQTL_data/Whole_Blood/SleepApnea/blood_",probe_list[i],".txt",sep = ""))
+  gene$Chr<-as.character(gene$Chr)
+  setnames(gene,c("Chr","b","SE","A1","A2"),c("CHR","Beta","se","Effect_Allele","Other_Allele"))
+  
+  sleep_dat<-subset(SleepApnea,SleepApnea$CHR==chr_list[i])
+  sleep_dat<-subset(SleepApnea,SleepApnea$BP<bp_list[i]+250000)
+  sleep_dat<-subset(SleepApnea,SleepApnea$BP>bp_list[i]-250000)
+  
+  #merge
+  merge1<-merge(gene,sleep_dat,by=c("CHR","BP","Effect_Allele","Other_Allele"),
+                suffixes=c(".gene",".sl"))
+  flip_pro <- dplyr::rename(gene,Effect_Allele=Other_Allele,Other_Allele=Effect_Allele)
+  flip_pro$Beta = 0-gene$Beta
+  merge2 <- merge(flip_pro,sleep_dat,by=c("CHR","BP","Effect_Allele","Other_Allele"),suffixes=c(".gene",".sl"))
+  input <- rbind(merge1,merge2)
+  input <- as.data.frame(input)
+  
+  gene_format<-format_data(input,type = "exposure",snps = NULL,header = TRUE,snp_col = "SNP.gene",chr_col = "CHR",pos_col = "BP",effect_allele_col = "Effect_Allele",other_allele_col = "Other_Allele",eaf_col = "Freq",beta_col = "Beta",se_col = "se",pval_col = "p")
+  sleep_format<-format_data(input,type = "outcome",snps = gene_format$SNP,header = TRUE,snp_col = "SNP.sl",chr_col = "CHR",pos_col = "BP",effect_allele_col = "Effect_Allele",other_allele_col = "Other_Allele",eaf_col = "FREQ",beta_col = "BETA",se_col = "BETA_SE",pval_col = "P")
+  har<-harmonise_data(gene_format,sleep_format,action = 1)
+  har<-subset(har,har$mr_keep==TRUE)
+  har$MAF<-ifelse(har$eaf.outcome<0.5,har$eaf.outcome,1-har$eaf.outcome)
+  har$N<-558
+  write.csv(har,paste("har/bloodgene/",gene_list[i],"_SleepApnea_har_250kb.csv",sep = ""))
+
+  result <- coloc.abf(dataset1=list(snp=har$SNP,beta=har$beta.outcome,
+                        varbeta=(har$se.outcome)^2,position=har$pos.outcome,type="cc"),
+                        
+                      dataset2=list(snp=har$SNP,beta=har$beta.exposure,
+                        varbeta=(har$se.exposure)^2,position=har$pos.exposure,
+                        type="quant",N=har$N,MAF=har$MAF)
+                      )
+  
+  need_result=(result$results %>% dplyr::arrange(desc(SNP.PP.H4)))[1,]
+    
+  #record results
+  need_result$gene<-gene_list[i]
+  need_result$sleep<-"SleepApnea"
+  need_result$nsnps<-result[["summary"]][["nsnps"]]
+  need_result$PPH0<-result[["summary"]][["PP.H0.abf"]]
+  need_result$PPH1<-result[["summary"]][["PP.H1.abf"]]
+  need_result$PPH2<-result[["summary"]][["PP.H2.abf"]]
+  need_result$PPH3<-result[["summary"]][["PP.H3.abf"]]
+  need_result$PPH4<-result[["summary"]][["PP.H4.abf"]]
+  
+  coloc_res<-rbind(coloc_res,need_result)
+}
+
+coloc_res<-coloc_res[-1,]
+
+write.xlsx(coloc_res,file = file.path("BloodGene_SleepApnea_colocalization_250kb.xlsx"))
+
+# ---------------------------------------------------------------------------
+# Chunk: Brain genes
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+setwd("Path/Colocalization/")
+
+mr_res<-read_excel("Path/SMR/Sig_Brain_SleepApnea.xlsx",sheet = "Sheet 1")
+mr_res$ProbeChr<-as.character(mr_res$ProbeChr)
+probe_list<-mr_res$probeID
+gene_list<-mr_res$Gene
+chr_list<-mr_res$ProbeChr
+bp_list<-c(1859368,36825334,40428647,47517603,48723360,49027319,49203754,126194762,136557863,183967483,148724993,74267847,74310231,99036545,12219528,95362539,141069497,30389695,107270158,50087403,30134615,89778264,67957903,21166862,4182601,9945689,46999755,57566092,61545758,18257258,29702572,41601209,42095503,42394792,42526908)
+
+#Create the colocalization summary table
+coloc_res<-data.frame(gene=NA,sleep=NA,nsnps=NA,PPH0=NA,PPH1=NA,PPH2=NA,PPH3=NA,PPH4=NA,snp=NA,position=NA,V.df1=NA,z.df1=NA,r.df1=NA,lABF.df1=NA,V.df2=NA,z.df2=NA,r.df2=NA,lABF.df2=NA,internal.sum.lABF=NA,SNP.PP.H4=NA)
+
+#Load the sleep apnea data and run the preprocessing steps
+load("Path/datasource/GWAS_data/sleepapnoea_FINNGEN_R12_allSNP_hg19.RData")
+SleepApnea <- dat_allSNP_hg19
+rm(dat_allSNP_hg19)
+SleepApnea<- subset(SleepApnea, SleepApnea$FREQ<1)
+SleepApnea<- SleepApnea[order(SleepApnea$P,decreasing = FALSE),]
+SleepApnea<- SleepApnea[!duplicated(SleepApnea$SNP),]
+SleepApnea$CHR<-as.character(SleepApnea$CHR)
+
+for (i in 1:nrow(mr_res)) {
+  gene<-fread(paste("Path/datasource/eQTL_data/Brain_Frontal_Cortex_BA9/SleepApnea/brain_",probe_list[i],".txt",sep = ""))
+  gene$Chr<-as.character(gene$Chr)
+  setnames(gene,c("Chr","b","SE","A1","A2"),c("CHR","Beta","se","Effect_Allele","Other_Allele"))
+  
+  sleep_dat<-subset(SleepApnea,SleepApnea$CHR==chr_list[i])
+  sleep_dat<-subset(SleepApnea,SleepApnea$BP<bp_list[i]+250000)
+  sleep_dat<-subset(SleepApnea,SleepApnea$BP>bp_list[i]-250000)
+  
+  #merge
+  merge1<-merge(gene,sleep_dat,by=c("CHR","BP","Effect_Allele","Other_Allele"),
+                suffixes=c(".gene",".sl"))
+  flip_pro <- dplyr::rename(gene,Effect_Allele=Other_Allele,Other_Allele=Effect_Allele)
+  flip_pro$Beta = 0-gene$Beta
+  merge2 <- merge(flip_pro,sleep_dat,by=c("CHR","BP","Effect_Allele","Other_Allele"),suffixes=c(".gene",".sl"))
+  input <- rbind(merge1,merge2)
+  input <- as.data.frame(input)
+  
+  gene_format<-format_data(input,type = "exposure",snps = NULL,header = TRUE,snp_col = "SNP.gene",chr_col = "CHR",pos_col = "BP",effect_allele_col = "Effect_Allele",other_allele_col = "Other_Allele",beta_col = "Beta",se_col = "se",pval_col = "p")
+  sleep_format<-format_data(input,type = "outcome",snps = gene_format$SNP,header = TRUE,snp_col = "SNP.sl",chr_col = "CHR",pos_col = "BP",effect_allele_col = "Effect_Allele",other_allele_col = "Other_Allele",eaf_col = "FREQ",beta_col = "BETA",se_col = "BETA_SE",pval_col = "P")
+  har<-harmonise_data(gene_format,sleep_format,action = 1)
+  har<-subset(har,har$mr_keep==TRUE)
+  har$MAF<-ifelse(har$eaf.outcome<0.5,har$eaf.outcome,1-har$eaf.outcome)
+  har$N<-157
+  write.csv(har,paste("har/braingene/",gene_list[i],"_SleepApnea_har_250kb.csv",sep = ""))
+
+  result <- coloc.abf(dataset1=list(snp=har$SNP,beta=har$beta.outcome,
+                        varbeta=(har$se.outcome)^2,position=har$pos.outcome,type="cc"),
+                        
+                      dataset2=list(snp=har$SNP,beta=har$beta.exposure,
+                        varbeta=(har$se.exposure)^2,position=har$pos.exposure,
+                        type="quant",N=har$N,MAF=har$MAF)
+                      )
+  
+  need_result=(result$results %>% dplyr::arrange(desc(SNP.PP.H4)))[1,]
+    
+  #record results
+  need_result$gene<-gene_list[i]
+  need_result$sleep<-"SleepApnea"
+  need_result$nsnps<-result[["summary"]][["nsnps"]]
+  need_result$PPH0<-result[["summary"]][["PP.H0.abf"]]
+  need_result$PPH1<-result[["summary"]][["PP.H1.abf"]]
+  need_result$PPH2<-result[["summary"]][["PP.H2.abf"]]
+  need_result$PPH3<-result[["summary"]][["PP.H3.abf"]]
+  need_result$PPH4<-result[["summary"]][["PP.H4.abf"]]
+  
+  coloc_res<-rbind(coloc_res,need_result)
+}
+
+coloc_res<-coloc_res[-1,]
+
+write.xlsx(coloc_res,file = file.path("BrainGene_SleepApnea_colocalization_250kb.xlsx"))
+```
+
+## `eQTL_SleepApnea_colocalization_500kb.Rmd`
+
+```{r "eQTL_SleepApnea_colocalization_500kb.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: eQTL_SleepApnea_colocalization_500kb.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(MendelianRandomization)
+library(dplyr)
+library(data.table)
+library(readxl)
+library(openxlsx)
+library(TwoSampleMR)
+library(plinkbinr)
+library(ieugwasr)
+library(ggplot2)
+library(mr.raps)
+library(coloc)
+library(stringr)
+library(locuscomparer)
+library(WhopGenome)
+
+# ---------------------------------------------------------------------------
+# Chunk: Blood genes
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+setwd("Path/Colocalization/")
+
+mr_res<-read_excel("Path/SMR/Sig_Blood_SleepApnea.xlsx",sheet = "Sheet 1")
+mr_res$ProbeChr<-as.character(mr_res$ProbeChr)
+probe_list<-mr_res$probeID
+gene_list<-mr_res$Gene
+chr_list<-mr_res$ProbeChr
+bp_list<-c(25071848,36621803,153940379,154540257,155200766,168511975,183441638,243219696,243265035,243418352,243419358,24346350,28718938,36825334,54342641,85766288,102972389,135676395,136288806,136633996,157291953,40494796,40498783,48723360,49044495,50654601,50707420,101395319,107241783,108321680,126194762,683230,967344,980785,25378835,31999019,43602825,96143803,112849380,40555204,12250926,72395660,74188309,74310231,74587848,75123401,75157453,76633979,76640868,120628731,8102189,10964214,10967236,11415531,95087632,98270943,136150617,141069497,76970509,104629273,13299345,113258513,28343299,58329958,110011679,110011617,124086646,21141208,36278510,50065415,52043758,1031596,21807080,29466285,30134615,30346375,55496209,27038872,28257170,45569858,79995608,80191563,21083473,4066943,4186418,33071974,41317295,3185331,45079429,18111584,41601209,42017100,42230669,42486032,42526908)
+
+#Create the colocalization summary table
+coloc_res<-data.frame(gene=NA,sleep=NA,nsnps=NA,PPH0=NA,PPH1=NA,PPH2=NA,PPH3=NA,PPH4=NA,snp=NA,position=NA,V.df1=NA,z.df1=NA,r.df1=NA,lABF.df1=NA,V.df2=NA,z.df2=NA,r.df2=NA,lABF.df2=NA,internal.sum.lABF=NA,SNP.PP.H4=NA)
+
+#Load the sleep apnea data and run the preprocessing steps
+load("Path/datasource/GWAS_data/sleepapnoea_FINNGEN_R12_allSNP_hg19.RData")
+SleepApnea <- dat_allSNP_hg19
+rm(dat_allSNP_hg19)
+SleepApnea<- subset(SleepApnea, SleepApnea$FREQ<1)
+SleepApnea<- SleepApnea[order(SleepApnea$P,decreasing = FALSE),]
+SleepApnea<- SleepApnea[!duplicated(SleepApnea$SNP),]
+SleepApnea$CHR<-as.character(SleepApnea$CHR)
+
+for (i in 1:nrow(mr_res)) {
+  gene<-fread(paste("Path/datasource/eQTL_data/Whole_Blood/SleepApnea/blood_",probe_list[i],".txt",sep = ""))
+  gene$Chr<-as.character(gene$Chr)
+  setnames(gene,c("Chr","b","SE","A1","A2"),c("CHR","Beta","se","Effect_Allele","Other_Allele"))
+  
+  sleep_dat<-subset(SleepApnea,SleepApnea$CHR==chr_list[i])
+  sleep_dat<-subset(SleepApnea,SleepApnea$BP<bp_list[i]+500000)
+  sleep_dat<-subset(SleepApnea,SleepApnea$BP>bp_list[i]-500000)
+  
+  #merge
+  merge1<-merge(gene,sleep_dat,by=c("CHR","BP","Effect_Allele","Other_Allele"),
+                suffixes=c(".gene",".sl"))
+  flip_pro <- dplyr::rename(gene,Effect_Allele=Other_Allele,Other_Allele=Effect_Allele)
+  flip_pro$Beta = 0-gene$Beta
+  merge2 <- merge(flip_pro,sleep_dat,by=c("CHR","BP","Effect_Allele","Other_Allele"),suffixes=c(".gene",".sl"))
+  input <- rbind(merge1,merge2)
+  input <- as.data.frame(input)
+  
+  gene_format<-format_data(input,type = "exposure",snps = NULL,header = TRUE,snp_col = "SNP.gene",chr_col = "CHR",pos_col = "BP",effect_allele_col = "Effect_Allele",other_allele_col = "Other_Allele",eaf_col = "Freq",beta_col = "Beta",se_col = "se",pval_col = "p")
+  sleep_format<-format_data(input,type = "outcome",snps = gene_format$SNP,header = TRUE,snp_col = "SNP.sl",chr_col = "CHR",pos_col = "BP",effect_allele_col = "Effect_Allele",other_allele_col = "Other_Allele",eaf_col = "FREQ",beta_col = "BETA",se_col = "BETA_SE",pval_col = "P")
+  har<-harmonise_data(gene_format,sleep_format,action = 1)
+  har<-subset(har,har$mr_keep==TRUE)
+  har$MAF<-ifelse(har$eaf.outcome<0.5,har$eaf.outcome,1-har$eaf.outcome)
+  har$N<-558
+  write.csv(har,paste("har/bloodgene/",gene_list[i],"_SleepApnea_har_500kb.csv",sep = ""))
+
+  result <- coloc.abf(dataset1=list(snp=har$SNP,beta=har$beta.outcome,
+                        varbeta=(har$se.outcome)^2,position=har$pos.outcome,type="cc"),
+                        
+                      dataset2=list(snp=har$SNP,beta=har$beta.exposure,
+                        varbeta=(har$se.exposure)^2,position=har$pos.exposure,
+                        type="quant",N=har$N,MAF=har$MAF)
+                      )
+  
+  need_result=(result$results %>% dplyr::arrange(desc(SNP.PP.H4)))[1,]
+    
+  #record results
+  need_result$gene<-gene_list[i]
+  need_result$sleep<-"SleepApnea"
+  need_result$nsnps<-result[["summary"]][["nsnps"]]
+  need_result$PPH0<-result[["summary"]][["PP.H0.abf"]]
+  need_result$PPH1<-result[["summary"]][["PP.H1.abf"]]
+  need_result$PPH2<-result[["summary"]][["PP.H2.abf"]]
+  need_result$PPH3<-result[["summary"]][["PP.H3.abf"]]
+  need_result$PPH4<-result[["summary"]][["PP.H4.abf"]]
+  
+  coloc_res<-rbind(coloc_res,need_result)
+}
+
+coloc_res<-coloc_res[-1,]
+
+write.xlsx(coloc_res,file = file.path("BloodGene_SleepApnea_colocalization_500kb.xlsx"))
+
+# ---------------------------------------------------------------------------
+# Chunk: Brain genes
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+setwd("Path/Colocalization/")
+
+mr_res<-read_excel("Path/SMR/Sig_Brain_SleepApnea.xlsx",sheet = "Sheet 1")
+mr_res$ProbeChr<-as.character(mr_res$ProbeChr)
+probe_list<-mr_res$probeID
+gene_list<-mr_res$Gene
+chr_list<-mr_res$ProbeChr
+bp_list<-c(1859368,36825334,40428647,47517603,48723360,49027319,49203754,126194762,136557863,183967483,148724993,74267847,74310231,99036545,12219528,95362539,141069497,30389695,107270158,50087403,30134615,89778264,67957903,21166862,4182601,9945689,46999755,57566092,61545758,18257258,29702572,41601209,42095503,42394792,42526908)
+
+#Create the colocalization summary table
+coloc_res<-data.frame(gene=NA,sleep=NA,nsnps=NA,PPH0=NA,PPH1=NA,PPH2=NA,PPH3=NA,PPH4=NA,snp=NA,position=NA,V.df1=NA,z.df1=NA,r.df1=NA,lABF.df1=NA,V.df2=NA,z.df2=NA,r.df2=NA,lABF.df2=NA,internal.sum.lABF=NA,SNP.PP.H4=NA)
+
+#Load the sleep apnea data and run the preprocessing steps
+load("Path/datasource/GWAS_data/sleepapnoea_FINNGEN_R12_allSNP_hg19.RData")
+SleepApnea <- dat_allSNP_hg19
+rm(dat_allSNP_hg19)
+SleepApnea<- subset(SleepApnea, SleepApnea$FREQ<1)
+SleepApnea<- SleepApnea[order(SleepApnea$P,decreasing = FALSE),]
+SleepApnea<- SleepApnea[!duplicated(SleepApnea$SNP),]
+SleepApnea$CHR<-as.character(SleepApnea$CHR)
+
+for (i in 1:nrow(mr_res)) {
+  gene<-fread(paste("Path/datasource/eQTL_data/Brain_Frontal_Cortex_BA9/SleepApnea/brain_",probe_list[i],".txt",sep = ""))
+  gene$Chr<-as.character(gene$Chr)
+  setnames(gene,c("Chr","b","SE","A1","A2"),c("CHR","Beta","se","Effect_Allele","Other_Allele"))
+  
+  sleep_dat<-subset(SleepApnea,SleepApnea$CHR==chr_list[i])
+  sleep_dat<-subset(SleepApnea,SleepApnea$BP<bp_list[i]+500000)
+  sleep_dat<-subset(SleepApnea,SleepApnea$BP>bp_list[i]-500000)
+  
+  #merge
+  merge1<-merge(gene,sleep_dat,by=c("CHR","BP","Effect_Allele","Other_Allele"),
+                suffixes=c(".gene",".sl"))
+  flip_pro <- dplyr::rename(gene,Effect_Allele=Other_Allele,Other_Allele=Effect_Allele)
+  flip_pro$Beta = 0-gene$Beta
+  merge2 <- merge(flip_pro,sleep_dat,by=c("CHR","BP","Effect_Allele","Other_Allele"),suffixes=c(".gene",".sl"))
+  input <- rbind(merge1,merge2)
+  input <- as.data.frame(input)
+  
+  gene_format<-format_data(input,type = "exposure",snps = NULL,header = TRUE,snp_col = "SNP.gene",chr_col = "CHR",pos_col = "BP",effect_allele_col = "Effect_Allele",other_allele_col = "Other_Allele",beta_col = "Beta",se_col = "se",pval_col = "p")
+  sleep_format<-format_data(input,type = "outcome",snps = gene_format$SNP,header = TRUE,snp_col = "SNP.sl",chr_col = "CHR",pos_col = "BP",effect_allele_col = "Effect_Allele",other_allele_col = "Other_Allele",eaf_col = "FREQ",beta_col = "BETA",se_col = "BETA_SE",pval_col = "P")
+  har<-harmonise_data(gene_format,sleep_format,action = 1)
+  har<-subset(har,har$mr_keep==TRUE)
+  har$MAF<-ifelse(har$eaf.outcome<0.5,har$eaf.outcome,1-har$eaf.outcome)
+  har$N<-157
+  write.csv(har,paste("har/braingene/",gene_list[i],"_SleepApnea_har_500kb.csv",sep = ""))
+
+  result <- coloc.abf(dataset1=list(snp=har$SNP,beta=har$beta.outcome,
+                        varbeta=(har$se.outcome)^2,position=har$pos.outcome,type="cc"),
+                        
+                      dataset2=list(snp=har$SNP,beta=har$beta.exposure,
+                        varbeta=(har$se.exposure)^2,position=har$pos.exposure,
+                        type="quant",N=har$N,MAF=har$MAF)
+                      )
+  
+  need_result=(result$results %>% dplyr::arrange(desc(SNP.PP.H4)))[1,]
+    
+  #record results
+  need_result$gene<-gene_list[i]
+  need_result$sleep<-"SleepApnea"
+  need_result$nsnps<-result[["summary"]][["nsnps"]]
+  need_result$PPH0<-result[["summary"]][["PP.H0.abf"]]
+  need_result$PPH1<-result[["summary"]][["PP.H1.abf"]]
+  need_result$PPH2<-result[["summary"]][["PP.H2.abf"]]
+  need_result$PPH3<-result[["summary"]][["PP.H3.abf"]]
+  need_result$PPH4<-result[["summary"]][["PP.H4.abf"]]
+  
+  coloc_res<-rbind(coloc_res,need_result)
+}
+
+coloc_res<-coloc_res[-1,]
+
+write.xlsx(coloc_res,file = file.path("BrainGene_SleepApnea_colocalization_500kb.xlsx"))
+```
+
+## `pQTL_SleepApnea_colocalization_100kb.Rmd`
+
+```{r "pQTL_SleepApnea_colocalization_100kb.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: pQTL_SleepApnea_colocalization_100kb.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(MendelianRandomization)
+library(dplyr)
+library(data.table)
+library(readxl)
+library(openxlsx)
+library(TwoSampleMR)
+library(plinkbinr)
+library(ieugwasr)
+library(ggplot2)
+library(mr.raps)
+library(coloc)
+library(stringr)
+library(locuscomparer)
+
+# ---------------------------------------------------------------------------
+# Chunk: Plasma proteins
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+setwd("Path/Colocalization/")
+
+mr_res<-read_excel("Path/SMR/Sig_Plasma_SleepApnea.xlsx",sheet = "Sheet 1")
+mr_res$ProbeChr<-as.character(mr_res$ProbeChr)
+gene_list<-mr_res$Gene
+chr_list<-mr_res$ProbeChr
+bp_list<-c(136594750,136743254,95768984,102201714,30134615,46908396)
+
+#Create the colocalization summary table
+coloc_res<-data.frame(protein=NA,sleep=NA,nsnps=NA,PPH0=NA,PPH1=NA,PPH2=NA,PPH3=NA,PPH4=NA,snp=NA,position=NA,V.df1=NA,z.df1=NA,r.df1=NA,lABF.df1=NA,V.df2=NA,z.df2=NA,r.df2=NA,lABF.df2=NA,internal.sum.lABF=NA,SNP.PP.H4=NA)
+
+#Load the sleep apnea data and run the preprocessing steps
+load("Path/datasource/GWAS_data/sleepapnoea_FINNGEN_R12_allSNP_hg19.RData")
+SleepApnea <- dat_allSNP_hg19
+rm(dat_allSNP_hg19)
+SleepApnea<- subset(SleepApnea, SleepApnea$FREQ<1)
+SleepApnea<- SleepApnea[order(SleepApnea$P,decreasing = FALSE),]
+SleepApnea<- SleepApnea[!duplicated(SleepApnea$SNP),]
+
+for (i in 1:nrow(mr_res)) {
+  protein<-fread(paste("Path/datasource/pQTL_data/ARIC/SleepApnea/",
+                       gene_list[i],".txt",sep = ""))
+  protein$Chr<-as.integer(protein$Chr)
+  setnames(protein,c("Chr","Bp","A1","A2"),c("CHR","BP","Effect_Allele","Other_Allele"))
+
+  sleep_dat<-subset(SleepApnea,SleepApnea$CHR==as.integer(chr_list[i]))
+  sleep_dat<-subset(SleepApnea,SleepApnea$BP<bp_list[i]+100000)
+  sleep_dat<-subset(SleepApnea,SleepApnea$BP>bp_list[i]-100000)
+  
+  #merge
+  merge1<-merge(protein,sleep_dat,by=c("CHR","BP","Effect_Allele","Other_Allele"),
+                suffixes=c(".pr",".sl"))
+  flip_pro <- dplyr::rename(protein,Effect_Allele=Other_Allele,Other_Allele=Effect_Allele)
+  flip_pro$Beta = 0-protein$Beta
+  merge2 <- merge(flip_pro,sleep_dat,by=c("CHR","BP","Effect_Allele","Other_Allele"),
+                suffixes=c(".pr",".sl"))
+  input <- rbind(merge1,merge2)
+  input <- as.data.frame(input)
+  
+  protein_format<-format_data(input,type = "exposure",snps = NULL,header = TRUE,snp_col = "SNP.pr",chr_col = "CHR",pos_col = "BP",effect_allele_col = "Effect_Allele",other_allele_col = "Other_Allele",eaf_col = "Freq",beta_col = "Beta",se_col = "se",pval_col = "p")
+  sleep_format<-format_data(input,type = "outcome",snps = protein_format$SNP,header = TRUE,snp_col = "SNP.sl",chr_col = "CHR",pos_col = "BP",effect_allele_col = "Effect_Allele",other_allele_col = "Other_Allele",eaf_col = "FREQ",beta_col = "BETA",se_col = "BETA_SE",pval_col = "P")
+  har<-harmonise_data(protein_format,sleep_format,action = 2)
+  har<-subset(har,har$mr_keep==TRUE)
+  har$N<-7213
+  har$MAF<-ifelse(har$eaf.exposure<0.5,har$eaf.exposure,1-har$eaf.exposure)
+  write.csv(har,paste("har/plasmaprotein/",gene_list[i],"_SleepApnea_har_100kb.csv",sep = ""))
+
+  result <- coloc.abf(dataset1=list(snp=har$SNP,beta=har$beta.outcome,
+                        varbeta=(har$se.outcome)^2,position=har$pos.outcome,type="cc"),
+                        
+                      dataset2=list(snp=har$SNP,beta=har$beta.exposure,
+                        varbeta=(har$se.exposure)^2,position=har$pos.exposure,
+                        type="quant",N=har$N,MAF=har$MAF)
+                      )
+  
+  need_result=(result$results %>% dplyr::arrange(desc(SNP.PP.H4)))[1,]
+    
+  #record results
+  need_result$protein<-gene_list[i]
+  need_result$sleep<-"SleepApnea"
+  need_result$nsnps<-result[["summary"]][["nsnps"]]
+  need_result$PPH0<-result[["summary"]][["PP.H0.abf"]]
+  need_result$PPH1<-result[["summary"]][["PP.H1.abf"]]
+  need_result$PPH2<-result[["summary"]][["PP.H2.abf"]]
+  need_result$PPH3<-result[["summary"]][["PP.H3.abf"]]
+  need_result$PPH4<-result[["summary"]][["PP.H4.abf"]]
+  
+  coloc_res<-rbind(coloc_res,need_result)
+}
+
+coloc_res<-coloc_res[-1,]
+
+write.xlsx(coloc_res,file = file.path("PlasmaPro_SleepApnea_colocalization_100kb.xlsx"))
+
+# ---------------------------------------------------------------------------
+# Chunk: Brain proteins
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+setwd("Path/Colocalization/")
+
+mr_res<-read_excel("Path/SMR/Sig_Brain_SleepApnea.xlsx",sheet = "Sheet 1")
+mr_res$ProbeChr<-as.character(mr_res$ProbeChr)
+gene_list<-mr_res$Gene
+chr_list<-mr_res$ProbeChr
+bp_list<-c(156722240,12250926,91061712,104678050,75135538,18121356)
+
+#Create the colocalization summary table
+coloc_res<-data.frame(protein=NA,sleep=NA,nsnps=NA,PPH0=NA,PPH1=NA,PPH2=NA,PPH3=NA,PPH4=NA,snp=NA,position=NA,V.df1=NA,z.df1=NA,r.df1=NA,lABF.df1=NA,V.df2=NA,z.df2=NA,r.df2=NA,lABF.df2=NA,internal.sum.lABF=NA,SNP.PP.H4=NA)
+
+#Load the sleep apnea data and run the preprocessing steps
+load("Path/datasource/GWAS_data/sleepapnoea_FINNGEN_R12_allSNP_hg19.RData")
+SleepApnea <- dat_allSNP_hg19
+rm(dat_allSNP_hg19)
+SleepApnea<- subset(SleepApnea, SleepApnea$FREQ<1)
+SleepApnea<- SleepApnea[order(SleepApnea$P,decreasing = FALSE),]
+SleepApnea<- SleepApnea[!duplicated(SleepApnea$SNP),]
+
+for (i in 1:nrow(mr_res)) {
+  protein<-fread(paste("Path/datasource/pQTL_data/ROSMAP/SleepApnea/",
+                       gene_list[i],".txt",sep = ""))
+  protein$Chr<-as.integer(protein$Chr)
+  setnames(protein,c("Chr","Bp","A1","A2"),c("CHR","BP","Effect_Allele","Other_Allele"))
+  
+  sleep_dat<-subset(SleepApnea,SleepApnea$CHR==as.integer(chr_list[i]))
+  sleep_dat<-subset(SleepApnea,SleepApnea$BP<bp_list[i]+100000)
+  sleep_dat<-subset(SleepApnea,SleepApnea$BP>bp_list[i]-100000)
+  
+  #merge
+  merge1<-merge(protein,sleep_dat,by=c("CHR","BP","Effect_Allele","Other_Allele"),
+                suffixes=c(".pr",".sl"))
+  flip_pro <- dplyr::rename(protein,Effect_Allele=Other_Allele,Other_Allele=Effect_Allele)
+  flip_pro$Beta = 0-protein$Beta
+  merge2 <- merge(flip_pro,sleep_dat,by=c("CHR","BP","Effect_Allele","Other_Allele"),
+                suffixes=c(".pr",".sl"))
+  input <- rbind(merge1,merge2)
+  input <- as.data.frame(input)
+  
+  protein_format<-format_data(input,type = "exposure",snps = NULL,header = TRUE,snp_col = "SNP.pr",chr_col = "CHR",pos_col = "BP",effect_allele_col = "Effect_Allele",other_allele_col = "Other_Allele",beta_col = "Beta",se_col = "se",pval_col = "p",samplesize_col = "N")
+  sleep_format<-format_data(input,type = "outcome",snps = protein_format$SNP,header = TRUE,snp_col = "SNP.sl",chr_col = "CHR",pos_col = "BP",effect_allele_col = "Effect_Allele",other_allele_col = "Other_Allele",eaf_col = "FREQ",beta_col = "BETA",se_col = "BETA_SE",pval_col = "P")
+  har<-harmonise_data(protein_format,sleep_format,action = 1)
+  har<-subset(har,har$mr_keep==TRUE)
+  har$N<-376
+  har$MAF<-ifelse(har$eaf.outcome<0.5,har$eaf.outcome,1-har$eaf.outcome)
+  write.csv(har,paste("har/brainprotein/",gene_list[i],"_SleepApnea_har_100kb.csv",sep = ""))
+
+  result <- coloc.abf(dataset1=list(snp=har$SNP,beta=har$beta.outcome,
+                        varbeta=(har$se.outcome)^2,position=har$pos.outcome,type="cc"),
+                        
+                      dataset2=list(snp=har$SNP,beta=har$beta.exposure,
+                        varbeta=(har$se.exposure)^2,position=har$pos.exposure,
+                        type="quant",N=har$N,MAF=har$MAF)
+                      )
+  
+  need_result=(result$results %>% dplyr::arrange(desc(SNP.PP.H4)))[1,]
+    
+  #record results
+  need_result$protein<-gene_list[i]
+  need_result$sleep<-"SleepApnea"
+  need_result$nsnps<-result[["summary"]][["nsnps"]]
+  need_result$PPH0<-result[["summary"]][["PP.H0.abf"]]
+  need_result$PPH1<-result[["summary"]][["PP.H1.abf"]]
+  need_result$PPH2<-result[["summary"]][["PP.H2.abf"]]
+  need_result$PPH3<-result[["summary"]][["PP.H3.abf"]]
+  need_result$PPH4<-result[["summary"]][["PP.H4.abf"]]
+  
+  coloc_res<-rbind(coloc_res,need_result)
+}
+
+coloc_res<-coloc_res[-1,]
+
+write.xlsx(coloc_res,file = file.path("BrainPro_SleepApnea_colocalization_100kb.xlsx"))
+```
+
+## `pQTL_SleepApnea_colocalization_250kb.Rmd`
+
+```{r "pQTL_SleepApnea_colocalization_250kb.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: pQTL_SleepApnea_colocalization_250kb.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(MendelianRandomization)
+library(dplyr)
+library(data.table)
+library(readxl)
+library(openxlsx)
+library(TwoSampleMR)
+library(plinkbinr)
+library(ieugwasr)
+library(ggplot2)
+library(mr.raps)
+library(coloc)
+library(stringr)
+library(locuscomparer)
+
+# ---------------------------------------------------------------------------
+# Chunk: Plasma proteins
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+setwd("Path/Colocalization/")
+
+mr_res<-read_excel("Path/SMR/Sig_Plasma_SleepApnea.xlsx",sheet = "Sheet 1")
+mr_res$ProbeChr<-as.character(mr_res$ProbeChr)
+gene_list<-mr_res$Gene
+chr_list<-mr_res$ProbeChr
+bp_list<-c(136594750,136743254,95768984,102201714,30134615,46908396)
+
+#Create the colocalization summary table
+coloc_res<-data.frame(protein=NA,sleep=NA,nsnps=NA,PPH0=NA,PPH1=NA,PPH2=NA,PPH3=NA,PPH4=NA,snp=NA,position=NA,V.df1=NA,z.df1=NA,r.df1=NA,lABF.df1=NA,V.df2=NA,z.df2=NA,r.df2=NA,lABF.df2=NA,internal.sum.lABF=NA,SNP.PP.H4=NA)
+
+#Load the sleep apnea data and run the preprocessing steps
+load("Path/datasource/GWAS_data/sleepapnoea_FINNGEN_R12_allSNP_hg19.RData")
+SleepApnea <- dat_allSNP_hg19
+rm(dat_allSNP_hg19)
+SleepApnea<- subset(SleepApnea, SleepApnea$FREQ<1)
+SleepApnea<- SleepApnea[order(SleepApnea$P,decreasing = FALSE),]
+SleepApnea<- SleepApnea[!duplicated(SleepApnea$SNP),]
+
+for (i in 1:nrow(mr_res)) {
+  protein<-fread(paste("Path/datasource/pQTL_data/ARIC/SleepApnea/",
+                       gene_list[i],".txt",sep = ""))
+  protein$Chr<-as.integer(protein$Chr)
+  setnames(protein,c("Chr","Bp","A1","A2"),c("CHR","BP","Effect_Allele","Other_Allele"))
+
+  sleep_dat<-subset(SleepApnea,SleepApnea$CHR==as.integer(chr_list[i]))
+  sleep_dat<-subset(SleepApnea,SleepApnea$BP<bp_list[i]+250000)
+  sleep_dat<-subset(SleepApnea,SleepApnea$BP>bp_list[i]-250000)
+  
+  #merge
+  merge1<-merge(protein,sleep_dat,by=c("CHR","BP","Effect_Allele","Other_Allele"),
+                suffixes=c(".pr",".sl"))
+  flip_pro <- dplyr::rename(protein,Effect_Allele=Other_Allele,Other_Allele=Effect_Allele)
+  flip_pro$Beta = 0-protein$Beta
+  merge2 <- merge(flip_pro,sleep_dat,by=c("CHR","BP","Effect_Allele","Other_Allele"),
+                suffixes=c(".pr",".sl"))
+  input <- rbind(merge1,merge2)
+  input <- as.data.frame(input)
+  
+  protein_format<-format_data(input,type = "exposure",snps = NULL,header = TRUE,snp_col = "SNP.pr",chr_col = "CHR",pos_col = "BP",effect_allele_col = "Effect_Allele",other_allele_col = "Other_Allele",eaf_col = "Freq",beta_col = "Beta",se_col = "se",pval_col = "p")
+  sleep_format<-format_data(input,type = "outcome",snps = protein_format$SNP,header = TRUE,snp_col = "SNP.sl",chr_col = "CHR",pos_col = "BP",effect_allele_col = "Effect_Allele",other_allele_col = "Other_Allele",eaf_col = "FREQ",beta_col = "BETA",se_col = "BETA_SE",pval_col = "P")
+  har<-harmonise_data(protein_format,sleep_format,action = 2)
+  har<-subset(har,har$mr_keep==TRUE)
+  har$N<-7213
+  har$MAF<-ifelse(har$eaf.exposure<0.5,har$eaf.exposure,1-har$eaf.exposure)
+  write.csv(har,paste("har/plasmaprotein/",gene_list[i],"_SleepApnea_har_250kb.csv",sep = ""))
+
+  result <- coloc.abf(dataset1=list(snp=har$SNP,beta=har$beta.outcome,
+                        varbeta=(har$se.outcome)^2,position=har$pos.outcome,type="cc"),
+                        
+                      dataset2=list(snp=har$SNP,beta=har$beta.exposure,
+                        varbeta=(har$se.exposure)^2,position=har$pos.exposure,
+                        type="quant",N=har$N,MAF=har$MAF)
+                      )
+  
+  need_result=(result$results %>% dplyr::arrange(desc(SNP.PP.H4)))[1,]
+    
+  #record results
+  need_result$protein<-gene_list[i]
+  need_result$sleep<-"SleepApnea"
+  need_result$nsnps<-result[["summary"]][["nsnps"]]
+  need_result$PPH0<-result[["summary"]][["PP.H0.abf"]]
+  need_result$PPH1<-result[["summary"]][["PP.H1.abf"]]
+  need_result$PPH2<-result[["summary"]][["PP.H2.abf"]]
+  need_result$PPH3<-result[["summary"]][["PP.H3.abf"]]
+  need_result$PPH4<-result[["summary"]][["PP.H4.abf"]]
+  
+  coloc_res<-rbind(coloc_res,need_result)
+}
+
+coloc_res<-coloc_res[-1,]
+
+write.xlsx(coloc_res,file = file.path("PlasmaPro_SleepApnea_colocalization_250kb.xlsx"))
+
+# ---------------------------------------------------------------------------
+# Chunk: Brain proteins
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+setwd("Path/Colocalization/")
+
+mr_res<-read_excel("Path/SMR/Sig_Brain_SleepApnea.xlsx",sheet = "Sheet 1")
+mr_res$ProbeChr<-as.character(mr_res$ProbeChr)
+gene_list<-mr_res$Gene
+chr_list<-mr_res$ProbeChr
+bp_list<-c(156722240,12250926,91061712,104678050,75135538,18121356)
+
+#Create the colocalization summary table
+coloc_res<-data.frame(protein=NA,sleep=NA,nsnps=NA,PPH0=NA,PPH1=NA,PPH2=NA,PPH3=NA,PPH4=NA,snp=NA,position=NA,V.df1=NA,z.df1=NA,r.df1=NA,lABF.df1=NA,V.df2=NA,z.df2=NA,r.df2=NA,lABF.df2=NA,internal.sum.lABF=NA,SNP.PP.H4=NA)
+
+#Load the sleep apnea data and run the preprocessing steps
+load("Path/datasource/GWAS_data/sleepapnoea_FINNGEN_R12_allSNP_hg19.RData")
+SleepApnea <- dat_allSNP_hg19
+rm(dat_allSNP_hg19)
+SleepApnea<- subset(SleepApnea, SleepApnea$FREQ<1)
+SleepApnea<- SleepApnea[order(SleepApnea$P,decreasing = FALSE),]
+SleepApnea<- SleepApnea[!duplicated(SleepApnea$SNP),]
+
+for (i in 1:nrow(mr_res)) {
+  protein<-fread(paste("Path/datasource/pQTL_data/ROSMAP/SleepApnea/",
+                       gene_list[i],".txt",sep = ""))
+  protein$Chr<-as.integer(protein$Chr)
+  setnames(protein,c("Chr","Bp","A1","A2"),c("CHR","BP","Effect_Allele","Other_Allele"))
+  
+  sleep_dat<-subset(SleepApnea,SleepApnea$CHR==as.integer(chr_list[i]))
+  sleep_dat<-subset(SleepApnea,SleepApnea$BP<bp_list[i]+250000)
+  sleep_dat<-subset(SleepApnea,SleepApnea$BP>bp_list[i]-250000)
+  
+  #merge
+  merge1<-merge(protein,sleep_dat,by=c("CHR","BP","Effect_Allele","Other_Allele"),
+                suffixes=c(".pr",".sl"))
+  flip_pro <- dplyr::rename(protein,Effect_Allele=Other_Allele,Other_Allele=Effect_Allele)
+  flip_pro$Beta = 0-protein$Beta
+  merge2 <- merge(flip_pro,sleep_dat,by=c("CHR","BP","Effect_Allele","Other_Allele"),
+                suffixes=c(".pr",".sl"))
+  input <- rbind(merge1,merge2)
+  input <- as.data.frame(input)
+  
+  protein_format<-format_data(input,type = "exposure",snps = NULL,header = TRUE,snp_col = "SNP.pr",chr_col = "CHR",pos_col = "BP",effect_allele_col = "Effect_Allele",other_allele_col = "Other_Allele",beta_col = "Beta",se_col = "se",pval_col = "p",samplesize_col = "N")
+  sleep_format<-format_data(input,type = "outcome",snps = protein_format$SNP,header = TRUE,snp_col = "SNP.sl",chr_col = "CHR",pos_col = "BP",effect_allele_col = "Effect_Allele",other_allele_col = "Other_Allele",eaf_col = "FREQ",beta_col = "BETA",se_col = "BETA_SE",pval_col = "P")
+  har<-harmonise_data(protein_format,sleep_format,action = 1)
+  har<-subset(har,har$mr_keep==TRUE)
+  har$N<-376
+  har$MAF<-ifelse(har$eaf.outcome<0.5,har$eaf.outcome,1-har$eaf.outcome)
+  write.csv(har,paste("har/brainprotein/",gene_list[i],"_SleepApnea_har_250kb.csv",sep = ""))
+
+  result <- coloc.abf(dataset1=list(snp=har$SNP,beta=har$beta.outcome,
+                        varbeta=(har$se.outcome)^2,position=har$pos.outcome,type="cc"),
+                        
+                      dataset2=list(snp=har$SNP,beta=har$beta.exposure,
+                        varbeta=(har$se.exposure)^2,position=har$pos.exposure,
+                        type="quant",N=har$N,MAF=har$MAF)
+                      )
+  
+  need_result=(result$results %>% dplyr::arrange(desc(SNP.PP.H4)))[1,]
+    
+  #record results
+  need_result$protein<-gene_list[i]
+  need_result$sleep<-"SleepApnea"
+  need_result$nsnps<-result[["summary"]][["nsnps"]]
+  need_result$PPH0<-result[["summary"]][["PP.H0.abf"]]
+  need_result$PPH1<-result[["summary"]][["PP.H1.abf"]]
+  need_result$PPH2<-result[["summary"]][["PP.H2.abf"]]
+  need_result$PPH3<-result[["summary"]][["PP.H3.abf"]]
+  need_result$PPH4<-result[["summary"]][["PP.H4.abf"]]
+  
+  coloc_res<-rbind(coloc_res,need_result)
+}
+
+coloc_res<-coloc_res[-1,]
+
+write.xlsx(coloc_res,file = file.path("BrainPro_SleepApnea_colocalization_250kb.xlsx"))
+```
+
+## `pQTL_SleepApnea_colocalization_500kb.Rmd`
+
+```{r "pQTL_SleepApnea_colocalization_500kb.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: pQTL_SleepApnea_colocalization_500kb.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(MendelianRandomization)
+library(dplyr)
+library(data.table)
+library(readxl)
+library(openxlsx)
+library(TwoSampleMR)
+library(plinkbinr)
+library(ieugwasr)
+library(ggplot2)
+library(mr.raps)
+library(coloc)
+library(stringr)
+library(locuscomparer)
+
+# ---------------------------------------------------------------------------
+# Chunk: Plasma proteins
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+setwd("Path/Colocalization/")
+
+mr_res<-read_excel("Path/SMR/Sig_Plasma_SleepApnea.xlsx",sheet = "Sheet 1")
+mr_res$ProbeChr<-as.character(mr_res$ProbeChr)
+gene_list<-mr_res$Gene
+chr_list<-mr_res$ProbeChr
+bp_list<-c(136594750,136743254,95768984,102201714,30134615,46908396)
+
+#Create the colocalization summary table
+coloc_res<-data.frame(protein=NA,sleep=NA,nsnps=NA,PPH0=NA,PPH1=NA,PPH2=NA,PPH3=NA,PPH4=NA,snp=NA,position=NA,V.df1=NA,z.df1=NA,r.df1=NA,lABF.df1=NA,V.df2=NA,z.df2=NA,r.df2=NA,lABF.df2=NA,internal.sum.lABF=NA,SNP.PP.H4=NA)
+
+#Load the sleep apnea data and run the preprocessing steps
+load("Path/datasource/GWAS_data/sleepapnoea_FINNGEN_R12_allSNP_hg19.RData")
+SleepApnea <- dat_allSNP_hg19
+rm(dat_allSNP_hg19)
+SleepApnea<- subset(SleepApnea, SleepApnea$FREQ<1)
+SleepApnea<- SleepApnea[order(SleepApnea$P,decreasing = FALSE),]
+SleepApnea<- SleepApnea[!duplicated(SleepApnea$SNP),]
+
+for (i in 1:nrow(mr_res)) {
+  protein<-fread(paste("Path/datasource/pQTL_data/ARIC/SleepApnea/",
+                       gene_list[i],".txt",sep = ""))
+  protein$Chr<-as.integer(protein$Chr)
+  setnames(protein,c("Chr","Bp","A1","A2"),c("CHR","BP","Effect_Allele","Other_Allele"))
+
+  sleep_dat<-subset(SleepApnea,SleepApnea$CHR==as.integer(chr_list[i]))
+  sleep_dat<-subset(SleepApnea,SleepApnea$BP<bp_list[i]+500000)
+  sleep_dat<-subset(SleepApnea,SleepApnea$BP>bp_list[i]-500000)
+  
+  #merge
+  merge1<-merge(protein,sleep_dat,by=c("CHR","BP","Effect_Allele","Other_Allele"),
+                suffixes=c(".pr",".sl"))
+  flip_pro <- dplyr::rename(protein,Effect_Allele=Other_Allele,Other_Allele=Effect_Allele)
+  flip_pro$Beta = 0-protein$Beta
+  merge2 <- merge(flip_pro,sleep_dat,by=c("CHR","BP","Effect_Allele","Other_Allele"),
+                suffixes=c(".pr",".sl"))
+  input <- rbind(merge1,merge2)
+  input <- as.data.frame(input)
+  
+  protein_format<-format_data(input,type = "exposure",snps = NULL,header = TRUE,snp_col = "SNP.pr",chr_col = "CHR",pos_col = "BP",effect_allele_col = "Effect_Allele",other_allele_col = "Other_Allele",eaf_col = "Freq",beta_col = "Beta",se_col = "se",pval_col = "p")
+  sleep_format<-format_data(input,type = "outcome",snps = protein_format$SNP,header = TRUE,snp_col = "SNP.sl",chr_col = "CHR",pos_col = "BP",effect_allele_col = "Effect_Allele",other_allele_col = "Other_Allele",eaf_col = "FREQ",beta_col = "BETA",se_col = "BETA_SE",pval_col = "P")
+  har<-harmonise_data(protein_format,sleep_format,action = 2)
+  har<-subset(har,har$mr_keep==TRUE)
+  har$N<-7213
+  har$MAF<-ifelse(har$eaf.exposure<0.5,har$eaf.exposure,1-har$eaf.exposure)
+  write.csv(har,paste("har/plasmaprotein/",gene_list[i],"_SleepApnea_har_500kb.csv",sep = ""))
+
+  result <- coloc.abf(dataset1=list(snp=har$SNP,beta=har$beta.outcome,
+                        varbeta=(har$se.outcome)^2,position=har$pos.outcome,type="cc"),
+                        
+                      dataset2=list(snp=har$SNP,beta=har$beta.exposure,
+                        varbeta=(har$se.exposure)^2,position=har$pos.exposure,
+                        type="quant",N=har$N,MAF=har$MAF)
+                      )
+  
+  need_result=(result$results %>% dplyr::arrange(desc(SNP.PP.H4)))[1,]
+    
+  #record results
+  need_result$protein<-gene_list[i]
+  need_result$sleep<-"SleepApnea"
+  need_result$nsnps<-result[["summary"]][["nsnps"]]
+  need_result$PPH0<-result[["summary"]][["PP.H0.abf"]]
+  need_result$PPH1<-result[["summary"]][["PP.H1.abf"]]
+  need_result$PPH2<-result[["summary"]][["PP.H2.abf"]]
+  need_result$PPH3<-result[["summary"]][["PP.H3.abf"]]
+  need_result$PPH4<-result[["summary"]][["PP.H4.abf"]]
+  
+  coloc_res<-rbind(coloc_res,need_result)
+}
+
+coloc_res<-coloc_res[-1,]
+
+write.xlsx(coloc_res,file = file.path("PlasmaPro_SleepApnea_colocalization_500kb.xlsx"))
+
+# ---------------------------------------------------------------------------
+# Chunk: Brain proteins
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+setwd("Path/Colocalization/")
+
+mr_res<-read_excel("Path/SMR/Sig_Brain_SleepApnea.xlsx",sheet = "Sheet 1")
+mr_res$ProbeChr<-as.character(mr_res$ProbeChr)
+gene_list<-mr_res$Gene
+chr_list<-mr_res$ProbeChr
+bp_list<-c(156722240,12250926,91061712,104678050,75135538,18121356)
+
+#Create the colocalization summary table
+coloc_res<-data.frame(protein=NA,sleep=NA,nsnps=NA,PPH0=NA,PPH1=NA,PPH2=NA,PPH3=NA,PPH4=NA,snp=NA,position=NA,V.df1=NA,z.df1=NA,r.df1=NA,lABF.df1=NA,V.df2=NA,z.df2=NA,r.df2=NA,lABF.df2=NA,internal.sum.lABF=NA,SNP.PP.H4=NA)
+
+#Load the sleep apnea data and run the preprocessing steps
+load("Path/datasource/GWAS_data/sleepapnoea_FINNGEN_R12_allSNP_hg19.RData")
+SleepApnea <- dat_allSNP_hg19
+rm(dat_allSNP_hg19)
+SleepApnea<- subset(SleepApnea, SleepApnea$FREQ<1)
+SleepApnea<- SleepApnea[order(SleepApnea$P,decreasing = FALSE),]
+SleepApnea<- SleepApnea[!duplicated(SleepApnea$SNP),]
+
+for (i in 1:nrow(mr_res)) {
+  protein<-fread(paste("Path/datasource/pQTL_data/ROSMAP/SleepApnea/",
+                       gene_list[i],".txt",sep = ""))
+  protein$Chr<-as.integer(protein$Chr)
+  setnames(protein,c("Chr","Bp","A1","A2"),c("CHR","BP","Effect_Allele","Other_Allele"))
+  
+  sleep_dat<-subset(SleepApnea,SleepApnea$CHR==as.integer(chr_list[i]))
+  sleep_dat<-subset(SleepApnea,SleepApnea$BP<bp_list[i]+500000)
+  sleep_dat<-subset(SleepApnea,SleepApnea$BP>bp_list[i]-500000)
+  
+  #merge
+  merge1<-merge(protein,sleep_dat,by=c("CHR","BP","Effect_Allele","Other_Allele"),
+                suffixes=c(".pr",".sl"))
+  flip_pro <- dplyr::rename(protein,Effect_Allele=Other_Allele,Other_Allele=Effect_Allele)
+  flip_pro$Beta = 0-protein$Beta
+  merge2 <- merge(flip_pro,sleep_dat,by=c("CHR","BP","Effect_Allele","Other_Allele"),
+                suffixes=c(".pr",".sl"))
+  input <- rbind(merge1,merge2)
+  input <- as.data.frame(input)
+  
+  protein_format<-format_data(input,type = "exposure",snps = NULL,header = TRUE,snp_col = "SNP.pr",chr_col = "CHR",pos_col = "BP",effect_allele_col = "Effect_Allele",other_allele_col = "Other_Allele",beta_col = "Beta",se_col = "se",pval_col = "p",samplesize_col = "N")
+  sleep_format<-format_data(input,type = "outcome",snps = protein_format$SNP,header = TRUE,snp_col = "SNP.sl",chr_col = "CHR",pos_col = "BP",effect_allele_col = "Effect_Allele",other_allele_col = "Other_Allele",eaf_col = "FREQ",beta_col = "BETA",se_col = "BETA_SE",pval_col = "P")
+  har<-harmonise_data(protein_format,sleep_format,action = 1)
+  har<-subset(har,har$mr_keep==TRUE)
+  har$N<-376
+  har$MAF<-ifelse(har$eaf.outcome<0.5,har$eaf.outcome,1-har$eaf.outcome)
+  write.csv(har,paste("har/brainprotein/",gene_list[i],"_SleepApnea_har_500kb.csv",sep = ""))
+
+  result <- coloc.abf(dataset1=list(snp=har$SNP,beta=har$beta.outcome,
+                        varbeta=(har$se.outcome)^2,position=har$pos.outcome,type="cc"),
+                        
+                      dataset2=list(snp=har$SNP,beta=har$beta.exposure,
+                        varbeta=(har$se.exposure)^2,position=har$pos.exposure,
+                        type="quant",N=har$N,MAF=har$MAF)
+                      )
+  
+  need_result=(result$results %>% dplyr::arrange(desc(SNP.PP.H4)))[1,]
+    
+  #record results
+  need_result$protein<-gene_list[i]
+  need_result$sleep<-"SleepApnea"
+  need_result$nsnps<-result[["summary"]][["nsnps"]]
+  need_result$PPH0<-result[["summary"]][["PP.H0.abf"]]
+  need_result$PPH1<-result[["summary"]][["PP.H1.abf"]]
+  need_result$PPH2<-result[["summary"]][["PP.H2.abf"]]
+  need_result$PPH3<-result[["summary"]][["PP.H3.abf"]]
+  need_result$PPH4<-result[["summary"]][["PP.H4.abf"]]
+  
+  coloc_res<-rbind(coloc_res,need_result)
+}
+
+coloc_res<-coloc_res[-1,]
+
+write.xlsx(coloc_res,file = file.path("BrainPro_SleepApnea_colocalization_500kb.xlsx"))
+```
+

@@ -1,0 +1,298 @@
+---
+title: "Methylation regulation: DNAm based SMR (merged code)"
+output: html_document
+---
+
+```{r global-options, include=FALSE}
+# Code chunks are shown but not executed: the analysis needs the input files of the
+# study, which are not part of this code repository. Set eval = TRUE (or run a chunk
+# manually) after the paths below have been pointed at your own copy of the data.
+knitr::opts_chunk$set(echo = TRUE, eval = FALSE)
+```
+
+# MethylationRegulation
+
+This document merges every source file of the MethylationRegulation folder. DNA
+methylation (mQTL) is used as the exposure to describe the methylation layer of the
+prioritized signals.
+
+The shell scripts run three sets of SMR analyses with the SMR 1.3.1 executable: mQTL
+against sleep apnea, mQTL against gene expression (mQTL-eQTL) and mQTL against plasma
+protein (mQTL-pQTL); the R scripts collect the per-chromosome results, apply the FDR
+correction and export the significant methylation probes.
+
+## Notes on the merged code
+
+* Each section below holds one source file of this folder, and the file name is given
+  both in the section heading and in the first comment line of the chunk.
+* Every path that pointed at the analysis tree of the original workstation is rewritten
+  to a short relative path below the placeholder root `Path/`; `Path/datasource/` stands
+  for the input data, `Path/R-4.3.1/bin/` for the R interpreter and
+  `Path/SMR/smr-1.3.1-win-x86_64/` for the SMR executable. Point them at your own
+  installation before running the code.
+* The Chinese comments and chunk titles of the original scripts are given in English;
+  the date of the original document header is not part of this merged file.
+* Shell scripts are kept in their own `bash` chunks.
+
+---
+
+## `SMRmQTL_SleepApnea_code.txt`
+
+```{bash "SMRmQTL_SleepApnea_code.txt", eval=FALSE}
+# ===========================================================================
+# Source file: SMRmQTL_SleepApnea_code.txt (shell script)
+# ===========================================================================
+#blood DNAm SMR
+cat Path/datasource/mQTL_data/mqtlchr_EUR.txt | while read line;
+do
+echo "Now reading:"$line
+var=${line:0:(-1)};
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --gwas-summary Path/datasource/GWAS_data/SleepApnea_SMR.txt --beqtl-summary Path/datasource/mQTL_data/"$var" --maf 0.01 --out Path/MethylationRegulation/"$var"_SleepApnea --thread-num 10
+echo "Probe "$var" has finished"
+done
+
+
+#brain DNAm SMR
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --gwas-summary Path/datasource/GWAS_data/SleepApnea_SMR.txt --beqtl-summary Path/datasource/mQTL_data/Brain-mMeta --maf 0.01 --out Path/MethylationRegulation/Brain_SleepApnea --thread-num 10
+```
+
+## `SMRmQTL_SleepApnea_Rcode.Rmd`
+
+```{r "SMRmQTL_SleepApnea_Rcode.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: SMRmQTL_SleepApnea_Rcode.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(openxlsx)
+library(readxl)
+library(dplyr)
+library(readr)
+library(data.table)
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the blood DNAm SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/MethylationRegulation/")
+mqtlchr<-read.table("Path/datasource/mQTL_data/mqtlchr_EUR.txt")
+
+all_results<-data.frame(mqtlchr=NA,probeID=NA,ProbeChr=NA,Gene=NA,Probe_bp=NA,topSNP=NA,topSNP_chr=NA,topSNP_bp=NA,A1=NA,A2=NA,Freq=NA,b_GWAS=NA,se_GWAS=NA,p_GWAS=NA,b_eQTL=NA,se_eQTL=NA,p_eQTL=NA,b_SMR=NA,se_SMR=NA,p_SMR=NA,p_HEIDI=NA,nsnp_HEIDI=NA)
+
+for (id in mqtlchr[[1]]) {
+  results<-read.delim(paste(id,"SleepApnea.smr",sep = "_"),
+                      header = TRUE,stringsAsFactors = FALSE)
+  
+  if(nrow(results)!=0){
+    results$mqtlchr<-id
+    all_results<-rbind(all_results,results)
+  }
+}
+all_results<-all_results[-1,]
+
+all_results$fdr<-p.adjust(all_results$p_SMR,method = "fdr",n = length(all_results$p_SMR))
+all_results$BETA<-paste(round(all_results$b_SMR,3)," (",round(all_results$b_SMR-1.96*all_results$se_SMR,3),"-",round(all_results$b_SMR+1.96*all_results$se_SMR,3),")",sep = "")
+all_results$OR<-paste(round(exp(all_results$b_SMR),3)," (",round(exp(all_results$b_SMR-1.96*all_results$se_SMR),3),"-",round(exp(all_results$b_SMR+1.96*all_results$se_SMR),3),")",sep = "")
+
+write.xlsx(all_results,"ALL_Blood_SleepApnea.xlsx")
+
+all_results<-subset(all_results,all_results$fdr<0.05)
+all_results<-subset(all_results,all_results$p_HEIDI>0.01)
+
+write.xlsx(all_results,"Sig_Blood_SleepApnea.xlsx")
+
+write.table(all_results$probeID,"Sig_Blood_SleepApnea_DNAm.txt",row.names = F,col.names = F,quote = FALSE)
+
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the brain DNAm SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/MethylationRegulation/")
+
+results<-read.delim("Brain_SleepApnea.smr",header = TRUE,stringsAsFactors = FALSE)
+
+results$fdr<-p.adjust(results$p_SMR,method = "fdr",n = length(results$p_SMR))
+results$BETA<-paste(round(results$b_SMR,3)," (",round(results$b_SMR-1.96*results$se_SMR,3),"-",round(results$b_SMR+1.96*results$se_SMR,3),")",sep = "")
+results$OR<-paste(round(exp(results$b_SMR),3)," (",round(exp(results$b_SMR-1.96*results$se_SMR),3),"-",round(exp(results$b_SMR+1.96*results$se_SMR),3),")",sep = "")
+write.xlsx(results,"ALL_Brain_SleepApnea.xlsx")
+results<-subset(results,results$fdr<0.05)
+results<-subset(results,results$p_HEIDI>0.01)
+write.xlsx(results,"Sig_Brain_SleepApnea.xlsx")
+
+write.table(results$probeID,"Sig_Brain_SleepApnea_DNAm.txt",row.names = F,col.names = F,quote = FALSE)
+```
+
+## `SMRmQTLeQTL_code.txt`
+
+```{bash "SMRmQTLeQTL_code.txt", eval=FALSE}
+# ===========================================================================
+# Source file: SMRmQTLeQTL_code.txt (shell script)
+# ===========================================================================
+#blood DNAm gene SMR
+cat Path/datasource/mQTL_data/mqtlchr_EUR.txt | while read line;
+do
+echo "Now reading:"$line
+var=${line:0:(-1)};
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --beqtl-summary Path/datasource/mQTL_data/"$var"  --beqtl-summary Path/datasource/eQTL_data/Whole_Blood/Whole_Blood --extract-exposure-probe Path/MethylationRegulation/Sig_Blood_SleepApnea_DNAm.txt --extract-outcome-probe Path/Colocalization/Sig_BloodGene_SleepApnea_probe.txt --maf 0.01 --out Path/MethylationRegulation/Blood_"$var"_mQTLeQTL_SleepApnea --thread-num 10
+echo "Probe "$var" has finished"
+done
+
+
+#brain DNAm gene SMR
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --beqtl-summary Path/datasource/mQTL_data/Brain-mMeta  --beqtl-summary Path/datasource/eQTL_data/Brain_Frontal_Cortex_BA9/Brain_Frontal_Cortex_BA9 --extract-exposure-probe Path/MethylationRegulation/Sig_Brain_SleepApnea_DNAm.txt --extract-outcome-probe Path/Colocalization/Sig_BrainGene_SleepApnea_probe.txt --maf 0.01 --out Path/MethylationRegulation/Brain_mQTLeQTL_SleepApnea --thread-num 10
+```
+
+## `SMRmQTLeQTL_Rcode.Rmd`
+
+```{r "SMRmQTLeQTL_Rcode.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: SMRmQTLeQTL_Rcode.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(readxl)
+library(openxlsx)
+library(data.table)
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the blood DNAm-gene SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/MethylationRegulation/")
+mqtlchr<-read.table("Path/datasource/mQTL_data/mqtlchr_EUR.txt")
+
+all_results<-data.frame(mqtlchr=NA,Expo_ID=NA,Expo_Chr=NA,Expo_Gene=NA,Expo_bp=NA,Outco_ID=NA,Outco_Chr=NA,Outco_Gene=NA,Outco_bp=NA,topSNP=NA,topSNP_chr=NA,topSNP_bp=NA,A1=NA,A2=NA,Freq=NA,b_Outco=NA,se_Outco=NA,p_Outco=NA,b_Expo=NA,se_Expo=NA,p_Expo=NA,b_SMR=NA,se_SMR=NA,p_SMR=NA,p_HEIDI=NA,nsnp_HEIDI=NA)
+
+for (id in mqtlchr[[1]]) {
+  if(file.exists(paste("Blood",id,"mQTLeQTL_SleepApnea.smr",sep = "_"))){
+    results<-read.delim(paste("Blood",id,"mQTLeQTL_SleepApnea.smr",sep = "_"),
+                      header = TRUE,stringsAsFactors = FALSE)
+  
+    if(nrow(results)!=0){
+      results$mqtlchr<-id
+      all_results<-rbind(all_results,results)
+    }
+  }
+}
+all_results<-all_results[-1,]
+
+all_results$fdr<-p.adjust(all_results$p_SMR,method = "fdr",n = length(all_results$p_SMR))
+all_results$BETA<-paste(round(all_results$b_SMR,3)," (",round(all_results$b_SMR-1.96*all_results$se_SMR,3),"-",round(all_results$b_SMR+1.96*all_results$se_SMR,3),")",sep = "")
+all_results$OR<-paste(round(exp(all_results$b_SMR),3)," (",round(exp(all_results$b_SMR-1.96*all_results$se_SMR),3),"-",round(exp(all_results$b_SMR+1.96*all_results$se_SMR),3),")",sep = "")
+
+write.xlsx(all_results,"ALL_Blood_mQTLeQTL_SleepApnea.xlsx")
+
+all_results<-subset(all_results,all_results$fdr<0.05)
+all_results<-subset(all_results,all_results$p_HEIDI>0.01)
+
+write.xlsx(all_results,"Sig_Blood_mQTLeQTL_SleepApnea.xlsx")
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the brain DNAm-gene SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/MethylationRegulation/")
+
+results<-read.delim("Brain_mQTLeQTL_SleepApnea.smr",header = TRUE,stringsAsFactors = FALSE)
+
+results$fdr<-p.adjust(results$p_SMR,method = "fdr",n = length(results$p_SMR))
+results$BETA<-paste(round(results$b_SMR,3)," (",round(results$b_SMR-1.96*results$se_SMR,3),"-",round(results$b_SMR+1.96*results$se_SMR,3),")",sep = "")
+results$OR<-paste(round(exp(results$b_SMR),3)," (",round(exp(results$b_SMR-1.96*results$se_SMR),3),"-",round(exp(results$b_SMR+1.96*results$se_SMR),3),")",sep = "")
+write.xlsx(results,"ALL_Brain_mQTLeQTL_SleepApnea.xlsx")
+results<-subset(results,results$fdr<0.05)
+results<-subset(results,results$p_HEIDI>0.01)
+write.xlsx(results,"Sig_Brain_mQTLeQTL_SleepApnea.xlsx")
+```
+
+## `SMRmQTLpQTL_code.txt`
+
+```{bash "SMRmQTLpQTL_code.txt", eval=FALSE}
+# ===========================================================================
+# Source file: SMRmQTLpQTL_code.txt (shell script)
+# ===========================================================================
+#blood DNAm protein SMR
+cat Path/datasource/mQTL_data/mqtlchr_EUR.txt | while read line;
+do
+echo "Now reading:"$line
+var=${line:0:(-1)};
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --beqtl-summary Path/datasource/mQTL_data/"$var"  --beqtl-summary Path/datasource/pQTL_data/Plasma_SleepApnea_PWAS_Sig --extract-exposure-probe Path/MethylationRegulation/Sig_Blood_SleepApnea_DNAm.txt --extract-outcome-probe Path/Colocalization/Sig_PlasmaPro_SleepApnea_probe.txt --maf 0.01 --out Path/MethylationRegulation/Blood_"$var"_mQTLpQTL_SleepApnea --thread-num 10
+echo "Probe "$var" has finished"
+done
+
+
+#brain DNAm protein SMR
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --beqtl-summary Path/datasource/mQTL_data/Brain-mMeta  --beqtl-summary Path/datasource/pQTL_data/Brain_SleepApnea_PWAS_Sig --extract-exposure-probe Path/MethylationRegulation/Sig_Brain_SleepApnea_DNAm.txt --extract-outcome-probe Path/Colocalization/Sig_BrainPro_SleepApnea_probe.txt --maf 0.01 --out Path/MethylationRegulation/Brain_mQTLpQTL_SleepApnea --thread-num 10
+```
+
+## `SMRmQTLpQTL_Rcode.Rmd`
+
+```{r "SMRmQTLpQTL_Rcode.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: SMRmQTLpQTL_Rcode.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(readxl)
+library(openxlsx)
+library(data.table)
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the blood DNAm-protein SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/MethylationRegulation/")
+mqtlchr<-read.table("Path/datasource/mQTL_data/mqtlchr_EUR.txt")
+
+all_results<-data.frame(mqtlchr=NA,Expo_ID=NA,Expo_Chr=NA,Expo_Gene=NA,Expo_bp=NA,Outco_ID=NA,Outco_Chr=NA,Outco_Gene=NA,Outco_bp=NA,topSNP=NA,topSNP_chr=NA,topSNP_bp=NA,A1=NA,A2=NA,Freq=NA,b_Outco=NA,se_Outco=NA,p_Outco=NA,b_Expo=NA,se_Expo=NA,p_Expo=NA,b_SMR=NA,se_SMR=NA,p_SMR=NA,p_HEIDI=NA,nsnp_HEIDI=NA)
+
+for (id in mqtlchr[[1]]) {
+  if(file.exists(paste("Blood",id,"mQTLpQTL_SleepApnea.smr",sep = "_"))){
+    results<-read.delim(paste("Blood",id,"mQTLpQTL_SleepApnea.smr",sep = "_"),
+                      header = TRUE,stringsAsFactors = FALSE)
+    
+    if(nrow(results)!=0){
+      results$mqtlchr<-id
+      all_results<-rbind(all_results,results)
+    }
+  }
+}
+all_results<-all_results[-1,]
+
+all_results$fdr<-p.adjust(all_results$p_SMR,method = "fdr",n = length(all_results$p_SMR))
+all_results$BETA<-paste(round(all_results$b_SMR,3)," (",round(all_results$b_SMR-1.96*all_results$se_SMR,3),"-",round(all_results$b_SMR+1.96*all_results$se_SMR,3),")",sep = "")
+all_results$OR<-paste(round(exp(all_results$b_SMR),3)," (",round(exp(all_results$b_SMR-1.96*all_results$se_SMR),3),"-",round(exp(all_results$b_SMR+1.96*all_results$se_SMR),3),")",sep = "")
+
+write.xlsx(all_results,"ALL_Blood_mQTLpQTL_SleepApnea.xlsx")
+
+all_results<-subset(all_results,all_results$fdr<0.05)
+all_results<-subset(all_results,all_results$p_HEIDI>0.01)
+
+write.xlsx(all_results,"Sig_Blood_mQTLpQTL_SleepApnea.xlsx")
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the brain DNAm-protein SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/MethylationRegulation/")
+
+results<-read.delim("Brain_mQTLpQTL_SleepApnea.smr",header = TRUE,stringsAsFactors = FALSE)
+
+results$fdr<-p.adjust(results$p_SMR,method = "fdr",n = length(results$p_SMR))
+results$BETA<-paste(round(results$b_SMR,3)," (",round(results$b_SMR-1.96*results$se_SMR,3),"-",round(results$b_SMR+1.96*results$se_SMR,3),")",sep = "")
+results$OR<-paste(round(exp(results$b_SMR),3)," (",round(exp(results$b_SMR-1.96*results$se_SMR),3),"-",round(exp(results$b_SMR+1.96*results$se_SMR),3),")",sep = "")
+write.xlsx(results,"ALL_Brain_mQTLpQTL_SleepApnea.xlsx")
+results<-subset(results,results$fdr<0.05)
+results<-subset(results,results$p_HEIDI>0.01)
+write.xlsx(results,"Sig_Brain_mQTLpQTL_SleepApnea.xlsx")
+```
+

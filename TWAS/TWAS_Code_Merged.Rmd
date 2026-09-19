@@ -1,0 +1,668 @@
+---
+title: "TWAS: transcriptome-wide association analysis (merged code)"
+output: html_document
+---
+
+```{r global-options, include=FALSE}
+# Code chunks are shown but not executed: the analysis needs the input files of the
+# study, which are not part of this code repository. Set eval = TRUE (or run a chunk
+# manually) after the paths below have been pointed at your own copy of the data.
+knitr::opts_chunk$set(echo = TRUE, eval = FALSE)
+```
+
+# TWAS
+
+This document merges every source file of the TWAS folder. Genetically predicted 
+blood (GTEx v8 whole blood) and brain (GTEx v8 frontal cortex BA9) gene expression 
+is tested for association with obstructive sleepapnea and with the five overnight 
+oximetry traits, using the FUSION elastic net weights.
+
+The shell scripts run FUSION.assoc_test.R chromosome by chromosome and the R scripts
+merge the per-chromosome output, apply a Benjamini-Hochberg FDR correction to TWAS.P
+and keep the genes that reach FDR < 0.05.
+
+## Notes on the merged code
+
+* Each section below holds one source file of this folder, and the file name is given
+  both in the section heading and in the first comment line of the chunk.
+* Every path that pointed at the analysis tree of the original workstation is rewritten
+  to a short relative path below the placeholder root `Path/`; `Path/datasource/` stands
+  for the input data, `Path/R-4.3.1/bin/` for the R interpreter and
+  `Path/SMR/smr-1.3.1-win-x86_64/` for the SMR executable. Point them at your own
+  installation before running the code.
+* The Chinese comments and chunk titles of the original scripts are given in English;
+  the date of the original document header is not part of this merged file.
+* Shell scripts are kept in their own `bash` chunks.
+
+---
+
+## `TWAS_AHI_code.txt`
+
+```{bash "TWAS_AHI_code.txt", eval=FALSE}
+# ===========================================================================
+# Source file: TWAS_AHI_code.txt (shell script)
+# ===========================================================================
+#blood gene TWAS
+CHR=22
+until [ $CHR -lt 1 ]
+do
+Path/R-4.3.1/bin/Rscript.exe Path/TWAS/Official_FUSION/fusion_twas-master/FUSION.assoc_test.R \
+--sumstats Path/datasource/GWAS_data/AHI_TWAS_format.txt \
+--weights Path/datasource/TWAS_weight/GTExv8.EUR.Whole_Blood.pos \
+--weights_dir Path/datasource/TWAS_weight/ \
+--ref_ld_chr Path/TWAS/Official_FUSION/LDref/1000G.EUR. \
+--force_model enet \
+--chr ${CHR} \
+--out Path/TWAS/GTEx_TWAS_by_chr/AHI_chr${CHR}.out
+let CHR-=1
+done
+
+
+#brain gene TWAS
+CHR=22
+until [ $CHR -lt 1 ]
+do
+Path/R-4.3.1/bin/Rscript.exe Path/TWAS/Official_FUSION/fusion_twas-master/FUSION.assoc_test.R \
+--sumstats Path/datasource/GWAS_data/AHI_TWAS_format.txt \
+--weights Path/datasource/TWAS_weight/GTExv8.EUR.Brain_Frontal_Cortex_BA9.pos \
+--weights_dir Path/datasource/TWAS_weight/ \
+--ref_ld_chr Path/TWAS/Official_FUSION/LDref/1000G.EUR. \
+--force_model enet \
+--chr ${CHR} \
+--out Path/TWAS/GTExBrain_TWAS_by_chr/AHI_chr${CHR}.out
+let CHR-=1
+done
+```
+
+## `TWAS_AHI_Rcode.Rmd`
+
+```{r "TWAS_AHI_Rcode.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: TWAS_AHI_Rcode.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(openxlsx)
+library(readxl)
+library(dplyr)
+library(readr)
+library(GenomicRanges)
+library(rtracklayer)
+library(data.table)
+
+# ---------------------------------------------------------------------------
+# Chunk: Merge blood TWAS results and export
+# ---------------------------------------------------------------------------
+rm(list = ls())
+results <- tibble()
+for (chr in 1:22) {
+    results <- rbind(results, read_tsv(paste0("Path/TWAS/GTEx_TWAS_by_chr/AHI_chr", chr, ".out")))
+    if(chr==6){
+        results <- rbind(results, read_tsv(paste0("Path/TWAS/GTEx_TWAS_by_chr/AHI_chr6.out.MHC")))
+    }
+}
+#FDR correction
+results$TWAS.P.FDR<-NA
+results_temp<-subset(results,results$TWAS.P!=0)
+results<-results[-which(results$ID %in% results_temp$ID),]
+results_temp$TWAS.P.FDR<-p.adjust(results_temp$TWAS.P,method = "fdr",n = length(results_temp$TWAS.P))
+results<-rbind(results_temp,results)
+write.xlsx(results,"Path/TWAS/BloodGene_AHI_TWAS.xlsx")
+
+#Select the significant TWAS results
+TWAS_res<-subset(results,results$TWAS.P.FDR<0.05)
+write.xlsx(TWAS_res,"Path/TWAS/BloodGene_AHI_TWAS_Sig.xlsx")
+
+# ---------------------------------------------------------------------------
+# Chunk: Merge brain TWAS results and export
+# ---------------------------------------------------------------------------
+rm(list = ls())
+results <- tibble()
+for (chr in 1:22) {
+    results <- rbind(results, read_tsv(paste0("Path/TWAS/GTExBrain_TWAS_by_chr/AHI_chr", chr, ".out")))
+    if(chr==6){
+        results <- rbind(results,read_tsv(paste0("Path/TWAS/GTExBrain_TWAS_by_chr/AHI_chr6.out.MHC")))
+    }
+}
+results$ID_Gene<- substring(results$ID,17,)
+#FDR correction
+results$TWAS.P.FDR<-NA
+results_temp<-subset(results,results$TWAS.P!=0)
+results<-results[-which(results$ID %in% results_temp$ID),]
+results_temp$TWAS.P.FDR<-p.adjust(results_temp$TWAS.P,method = "fdr",n = length(results_temp$TWAS.P))
+results<-rbind(results_temp,results)
+write.xlsx(results,"Path/TWAS/BrainGene_AHI_TWAS.xlsx")
+
+#Select the significant TWAS results
+TWAS_res<-subset(results,results$TWAS.P.FDR<0.05)
+write.xlsx(TWAS_res,"Path/TWAS/BrainGene_AHI_TWAS_Sig.xlsx")
+```
+
+## `TWAS_AvgDesat_code.txt`
+
+```{bash "TWAS_AvgDesat_code.txt", eval=FALSE}
+# ===========================================================================
+# Source file: TWAS_AvgDesat_code.txt (shell script)
+# ===========================================================================
+#blood gene TWAS
+CHR=22
+until [ $CHR -lt 1 ]
+do
+Path/R-4.3.1/bin/Rscript.exe Path/TWAS/Official_FUSION/fusion_twas-master/FUSION.assoc_test.R \
+--sumstats Path/datasource/GWAS_data/AvgDesat_TWAS_format.txt \
+--weights Path/datasource/TWAS_weight/GTExv8.EUR.Whole_Blood.pos \
+--weights_dir Path/datasource/TWAS_weight/ \
+--ref_ld_chr Path/TWAS/Official_FUSION/LDref/1000G.EUR. \
+--force_model enet \
+--chr ${CHR} \
+--out Path/TWAS/GTEx_TWAS_by_chr/AvgDesat_chr${CHR}.out
+let CHR-=1
+done
+
+
+#brain gene TWAS
+CHR=22
+until [ $CHR -lt 1 ]
+do
+Path/R-4.3.1/bin/Rscript.exe Path/TWAS/Official_FUSION/fusion_twas-master/FUSION.assoc_test.R \
+--sumstats Path/datasource/GWAS_data/AvgDesat_TWAS_format.txt \
+--weights Path/datasource/TWAS_weight/GTExv8.EUR.Brain_Frontal_Cortex_BA9.pos \
+--weights_dir Path/datasource/TWAS_weight/ \
+--ref_ld_chr Path/TWAS/Official_FUSION/LDref/1000G.EUR. \
+--force_model enet \
+--chr ${CHR} \
+--out Path/TWAS/GTExBrain_TWAS_by_chr/AvgDesat_chr${CHR}.out
+let CHR-=1
+done
+```
+
+## `TWAS_AvgDesat_Rcode.Rmd`
+
+```{r "TWAS_AvgDesat_Rcode.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: TWAS_AvgDesat_Rcode.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(openxlsx)
+library(readxl)
+library(dplyr)
+library(readr)
+library(GenomicRanges)
+library(rtracklayer)
+library(data.table)
+
+# ---------------------------------------------------------------------------
+# Chunk: Merge blood TWAS results and export
+# ---------------------------------------------------------------------------
+rm(list = ls())
+results <- tibble()
+for (chr in 1:22) {
+    results <- rbind(results, read_tsv(paste0("Path/TWAS/GTEx_TWAS_by_chr/AvgDesat_chr", chr, ".out")))
+    if(chr==6){
+        results <- rbind(results, read_tsv(paste0("Path/TWAS/GTEx_TWAS_by_chr/AvgDesat_chr6.out.MHC")))
+    }
+}
+#FDR correction
+results$TWAS.P.FDR<-NA
+results_temp<-subset(results,results$TWAS.P!=0)
+results<-results[-which(results$ID %in% results_temp$ID),]
+results_temp$TWAS.P.FDR<-p.adjust(results_temp$TWAS.P,method = "fdr",n = length(results_temp$TWAS.P))
+results<-rbind(results_temp,results)
+write.xlsx(results,"Path/TWAS/BloodGene_AvgDesat_TWAS.xlsx")
+
+#Select the significant TWAS results
+TWAS_res<-subset(results,results$TWAS.P.FDR<0.05)
+write.xlsx(TWAS_res,"Path/TWAS/BloodGene_AvgDesat_TWAS_Sig.xlsx")
+
+# ---------------------------------------------------------------------------
+# Chunk: Merge brain TWAS results and export
+# ---------------------------------------------------------------------------
+rm(list = ls())
+results <- tibble()
+for (chr in 1:22) {
+    results <- rbind(results, read_tsv(paste0("Path/TWAS/GTExBrain_TWAS_by_chr/AvgDesat_chr", chr, ".out")))
+    if(chr==6){
+        results <- rbind(results,read_tsv(paste0("Path/TWAS/GTExBrain_TWAS_by_chr/AvgDesat_chr6.out.MHC")))
+    }
+}
+results$ID_Gene<- substring(results$ID,17,)
+#FDR correction
+results$TWAS.P.FDR<-NA
+results_temp<-subset(results,results$TWAS.P!=0)
+results<-results[-which(results$ID %in% results_temp$ID),]
+results_temp$TWAS.P.FDR<-p.adjust(results_temp$TWAS.P,method = "fdr",n = length(results_temp$TWAS.P))
+results<-rbind(results_temp,results)
+write.xlsx(results,"Path/TWAS/BrainGene_AvgDesat_TWAS.xlsx")
+
+#Select the significant TWAS results
+TWAS_res<-subset(results,results$TWAS.P.FDR<0.05)
+write.xlsx(TWAS_res,"Path/TWAS/BrainGene_AvgDesat_TWAS_Sig.xlsx")
+```
+
+## `TWAS_AvgSpo2_code.txt`
+
+```{bash "TWAS_AvgSpo2_code.txt", eval=FALSE}
+# ===========================================================================
+# Source file: TWAS_AvgSpo2_code.txt (shell script)
+# ===========================================================================
+#blood gene TWAS
+CHR=22
+until [ $CHR -lt 1 ]
+do
+Path/R-4.3.1/bin/Rscript.exe Path/TWAS/Official_FUSION/fusion_twas-master/FUSION.assoc_test.R \
+--sumstats Path/datasource/GWAS_data/AvgSpo2_TWAS_format.txt \
+--weights Path/datasource/TWAS_weight/GTExv8.EUR.Whole_Blood.pos \
+--weights_dir Path/datasource/TWAS_weight/ \
+--ref_ld_chr Path/TWAS/Official_FUSION/LDref/1000G.EUR. \
+--force_model enet \
+--chr ${CHR} \
+--out Path/TWAS/GTEx_TWAS_by_chr/AvgSpo2_chr${CHR}.out
+let CHR-=1
+done
+
+
+#brain gene TWAS
+CHR=22
+until [ $CHR -lt 1 ]
+do
+Path/R-4.3.1/bin/Rscript.exe Path/TWAS/Official_FUSION/fusion_twas-master/FUSION.assoc_test.R \
+--sumstats Path/datasource/GWAS_data/AvgSpo2_TWAS_format.txt \
+--weights Path/datasource/TWAS_weight/GTExv8.EUR.Brain_Frontal_Cortex_BA9.pos \
+--weights_dir Path/datasource/TWAS_weight/ \
+--ref_ld_chr Path/TWAS/Official_FUSION/LDref/1000G.EUR. \
+--force_model enet \
+--chr ${CHR} \
+--out Path/TWAS/GTExBrain_TWAS_by_chr/AvgSpo2_chr${CHR}.out
+let CHR-=1
+done
+```
+
+## `TWAS_AvgSpo2_Rcode.Rmd`
+
+```{r "TWAS_AvgSpo2_Rcode.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: TWAS_AvgSpo2_Rcode.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(openxlsx)
+library(readxl)
+library(dplyr)
+library(readr)
+library(GenomicRanges)
+library(rtracklayer)
+library(data.table)
+
+# ---------------------------------------------------------------------------
+# Chunk: Merge blood TWAS results and export
+# ---------------------------------------------------------------------------
+rm(list = ls())
+results <- tibble()
+for (chr in 1:22) {
+    results <- rbind(results, read_tsv(paste0("Path/TWAS/GTEx_TWAS_by_chr/AvgSpo2_chr", chr, ".out")))
+    if(chr==6){
+        results <- rbind(results, read_tsv(paste0("Path/TWAS/GTEx_TWAS_by_chr/AvgSpo2_chr6.out.MHC")))
+    }
+}
+#FDR correction
+results$TWAS.P.FDR<-NA
+results_temp<-subset(results,results$TWAS.P!=0)
+results<-results[-which(results$ID %in% results_temp$ID),]
+results_temp$TWAS.P.FDR<-p.adjust(results_temp$TWAS.P,method = "fdr",n = length(results_temp$TWAS.P))
+results<-rbind(results_temp,results)
+write.xlsx(results,"Path/TWAS/BloodGene_AvgSpo2_TWAS.xlsx")
+
+#Select the significant TWAS results
+TWAS_res<-subset(results,results$TWAS.P.FDR<0.05)
+write.xlsx(TWAS_res,"Path/TWAS/BloodGene_AvgSpo2_TWAS_Sig.xlsx")
+
+# ---------------------------------------------------------------------------
+# Chunk: Merge brain TWAS results and export
+# ---------------------------------------------------------------------------
+rm(list = ls())
+results <- tibble()
+for (chr in 1:22) {
+    results <- rbind(results, read_tsv(paste0("Path/TWAS/GTExBrain_TWAS_by_chr/AvgSpo2_chr", chr, ".out")))
+    if(chr==6){
+        results <- rbind(results,read_tsv(paste0("Path/TWAS/GTExBrain_TWAS_by_chr/AvgSpo2_chr6.out.MHC")))
+    }
+}
+results$ID_Gene<- substring(results$ID,17,)
+#FDR correction
+results$TWAS.P.FDR<-NA
+results_temp<-subset(results,results$TWAS.P!=0)
+results<-results[-which(results$ID %in% results_temp$ID),]
+results_temp$TWAS.P.FDR<-p.adjust(results_temp$TWAS.P,method = "fdr",n = length(results_temp$TWAS.P))
+results<-rbind(results_temp,results)
+write.xlsx(results,"Path/TWAS/BrainGene_AvgSpo2_TWAS.xlsx")
+
+#Select the significant TWAS results
+TWAS_res<-subset(results,results$TWAS.P.FDR<0.05)
+write.xlsx(TWAS_res,"Path/TWAS/BrainGene_AvgSpo2_TWAS_Sig.xlsx")
+```
+
+## `TWAS_MinSpo2_code.txt`
+
+```{bash "TWAS_MinSpo2_code.txt", eval=FALSE}
+# ===========================================================================
+# Source file: TWAS_MinSpo2_code.txt (shell script)
+# ===========================================================================
+#blood gene TWAS
+CHR=22
+until [ $CHR -lt 1 ]
+do
+Path/R-4.3.1/bin/Rscript.exe Path/TWAS/Official_FUSION/fusion_twas-master/FUSION.assoc_test.R \
+--sumstats Path/datasource/GWAS_data/MinSpo2_TWAS_format.txt \
+--weights Path/datasource/TWAS_weight/GTExv8.EUR.Whole_Blood.pos \
+--weights_dir Path/datasource/TWAS_weight/ \
+--ref_ld_chr Path/TWAS/Official_FUSION/LDref/1000G.EUR. \
+--force_model enet \
+--chr ${CHR} \
+--out Path/TWAS/GTEx_TWAS_by_chr/MinSpo2_chr${CHR}.out
+let CHR-=1
+done
+
+
+#brain gene TWAS
+CHR=22
+until [ $CHR -lt 1 ]
+do
+Path/R-4.3.1/bin/Rscript.exe Path/TWAS/Official_FUSION/fusion_twas-master/FUSION.assoc_test.R \
+--sumstats Path/datasource/GWAS_data/MinSpo2_TWAS_format.txt \
+--weights Path/datasource/TWAS_weight/GTExv8.EUR.Brain_Frontal_Cortex_BA9.pos \
+--weights_dir Path/datasource/TWAS_weight/ \
+--ref_ld_chr Path/TWAS/Official_FUSION/LDref/1000G.EUR. \
+--force_model enet \
+--chr ${CHR} \
+--out Path/TWAS/GTExBrain_TWAS_by_chr/MinSpo2_chr${CHR}.out
+let CHR-=1
+done
+```
+
+## `TWAS_MinSpo2_Rcode.Rmd`
+
+```{r "TWAS_MinSpo2_Rcode.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: TWAS_MinSpo2_Rcode.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(openxlsx)
+library(readxl)
+library(dplyr)
+library(readr)
+library(GenomicRanges)
+library(rtracklayer)
+library(data.table)
+
+# ---------------------------------------------------------------------------
+# Chunk: Merge blood TWAS results and export
+# ---------------------------------------------------------------------------
+rm(list = ls())
+results <- tibble()
+for (chr in 1:22) {
+    results <- rbind(results, read_tsv(paste0("Path/TWAS/GTEx_TWAS_by_chr/MinSpo2_chr", chr, ".out")))
+    if(chr==6){
+        results <- rbind(results, read_tsv(paste0("Path/TWAS/GTEx_TWAS_by_chr/MinSpo2_chr6.out.MHC")))
+    }
+}
+#FDR correction
+results$TWAS.P.FDR<-NA
+results_temp<-subset(results,results$TWAS.P!=0)
+results<-results[-which(results$ID %in% results_temp$ID),]
+results_temp$TWAS.P.FDR<-p.adjust(results_temp$TWAS.P,method = "fdr",n = length(results_temp$TWAS.P))
+results<-rbind(results_temp,results)
+write.xlsx(results,"Path/TWAS/BloodGene_MinSpo2_TWAS.xlsx")
+
+#Select the significant TWAS results
+TWAS_res<-subset(results,results$TWAS.P.FDR<0.05)
+write.xlsx(TWAS_res,"Path/TWAS/BloodGene_MinSpo2_TWAS_Sig.xlsx")
+
+# ---------------------------------------------------------------------------
+# Chunk: Merge brain TWAS results and export
+# ---------------------------------------------------------------------------
+rm(list = ls())
+results <- tibble()
+for (chr in 1:22) {
+    results <- rbind(results, read_tsv(paste0("Path/TWAS/GTExBrain_TWAS_by_chr/MinSpo2_chr", chr, ".out")))
+    if(chr==6){
+        results <- rbind(results,read_tsv(paste0("Path/TWAS/GTExBrain_TWAS_by_chr/MinSpo2_chr6.out.MHC")))
+    }
+}
+results$ID_Gene<- substring(results$ID,17,)
+#FDR correction
+results$TWAS.P.FDR<-NA
+results_temp<-subset(results,results$TWAS.P!=0)
+results<-results[-which(results$ID %in% results_temp$ID),]
+results_temp$TWAS.P.FDR<-p.adjust(results_temp$TWAS.P,method = "fdr",n = length(results_temp$TWAS.P))
+results<-rbind(results_temp,results)
+write.xlsx(results,"Path/TWAS/BrainGene_MinSpo2_TWAS.xlsx")
+
+#Select the significant TWAS results
+TWAS_res<-subset(results,results$TWAS.P.FDR<0.05)
+write.xlsx(TWAS_res,"Path/TWAS/BrainGene_MinSpo2_TWAS_Sig.xlsx")
+```
+
+## `TWAS_Per90_code.txt`
+
+```{bash "TWAS_Per90_code.txt", eval=FALSE}
+# ===========================================================================
+# Source file: TWAS_Per90_code.txt (shell script)
+# ===========================================================================
+#blood gene TWAS
+CHR=22
+until [ $CHR -lt 1 ]
+do
+Path/R-4.3.1/bin/Rscript.exe Path/TWAS/Official_FUSION/fusion_twas-master/FUSION.assoc_test.R \
+--sumstats Path/datasource/GWAS_data/Per90_TWAS_format.txt \
+--weights Path/datasource/TWAS_weight/GTExv8.EUR.Whole_Blood.pos \
+--weights_dir Path/datasource/TWAS_weight/ \
+--ref_ld_chr Path/TWAS/Official_FUSION/LDref/1000G.EUR. \
+--force_model enet \
+--chr ${CHR} \
+--out Path/TWAS/GTEx_TWAS_by_chr/Per90_chr${CHR}.out
+let CHR-=1
+done
+
+
+#brain gene TWAS
+CHR=22
+until [ $CHR -lt 1 ]
+do
+Path/R-4.3.1/bin/Rscript.exe Path/TWAS/Official_FUSION/fusion_twas-master/FUSION.assoc_test.R \
+--sumstats Path/datasource/GWAS_data/Per90_TWAS_format.txt \
+--weights Path/datasource/TWAS_weight/GTExv8.EUR.Brain_Frontal_Cortex_BA9.pos \
+--weights_dir Path/datasource/TWAS_weight/ \
+--ref_ld_chr Path/TWAS/Official_FUSION/LDref/1000G.EUR. \
+--force_model enet \
+--chr ${CHR} \
+--out Path/TWAS/GTExBrain_TWAS_by_chr/Per90_chr${CHR}.out
+let CHR-=1
+done
+```
+
+## `TWAS_Per90_Rcode.Rmd`
+
+```{r "TWAS_Per90_Rcode.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: TWAS_Per90_Rcode.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(openxlsx)
+library(readxl)
+library(dplyr)
+library(readr)
+library(GenomicRanges)
+library(rtracklayer)
+library(data.table)
+
+# ---------------------------------------------------------------------------
+# Chunk: Merge blood TWAS results and export
+# ---------------------------------------------------------------------------
+rm(list = ls())
+results <- tibble()
+for (chr in 1:22) {
+    results <- rbind(results, read_tsv(paste0("Path/TWAS/GTEx_TWAS_by_chr/Per90_chr", chr, ".out")))
+    if(chr==6){
+        results <- rbind(results, read_tsv(paste0("Path/TWAS/GTEx_TWAS_by_chr/Per90_chr6.out.MHC")))
+    }
+}
+#FDR correction
+results$TWAS.P.FDR<-NA
+results_temp<-subset(results,results$TWAS.P!=0)
+results<-results[-which(results$ID %in% results_temp$ID),]
+results_temp$TWAS.P.FDR<-p.adjust(results_temp$TWAS.P,method = "fdr",n = length(results_temp$TWAS.P))
+results<-rbind(results_temp,results)
+write.xlsx(results,"Path/TWAS/BloodGene_Per90_TWAS.xlsx")
+
+#Select the significant TWAS results
+TWAS_res<-subset(results,results$TWAS.P.FDR<0.05)
+write.xlsx(TWAS_res,"Path/TWAS/BloodGene_Per90_TWAS_Sig.xlsx")
+
+# ---------------------------------------------------------------------------
+# Chunk: Merge brain TWAS results and export
+# ---------------------------------------------------------------------------
+rm(list = ls())
+results <- tibble()
+for (chr in 1:22) {
+    results <- rbind(results, read_tsv(paste0("Path/TWAS/GTExBrain_TWAS_by_chr/Per90_chr", chr, ".out")))
+    if(chr==6){
+        results <- rbind(results,read_tsv(paste0("Path/TWAS/GTExBrain_TWAS_by_chr/Per90_chr6.out.MHC")))
+    }
+}
+results$ID_Gene<- substring(results$ID,17,)
+#FDR correction
+results$TWAS.P.FDR<-NA
+results_temp<-subset(results,results$TWAS.P!=0)
+results<-results[-which(results$ID %in% results_temp$ID),]
+results_temp$TWAS.P.FDR<-p.adjust(results_temp$TWAS.P,method = "fdr",n = length(results_temp$TWAS.P))
+results<-rbind(results_temp,results)
+write.xlsx(results,"Path/TWAS/BrainGene_Per90_TWAS.xlsx")
+
+#Select the significant TWAS results
+TWAS_res<-subset(results,results$TWAS.P.FDR<0.05)
+write.xlsx(TWAS_res,"Path/TWAS/BrainGene_Per90_TWAS_Sig.xlsx")
+```
+
+## `TWAS_SleepApnea_code.txt`
+
+```{bash "TWAS_SleepApnea_code.txt", eval=FALSE}
+# ===========================================================================
+# Source file: TWAS_SleepApnea_code.txt (shell script)
+# ===========================================================================
+#blood gene TWAS
+CHR=22
+until [ $CHR -lt 1 ]
+do
+Path/R-4.3.1/bin/Rscript.exe Path/TWAS/Official_FUSION/fusion_twas-master/FUSION.assoc_test.R \
+--sumstats Path/datasource/GWAS_data/SleepApnea_TWAS_format.txt \
+--weights Path/datasource/TWAS_weight/GTExv8.EUR.Whole_Blood.pos \
+--weights_dir Path/datasource/TWAS_weight/ \
+--ref_ld_chr Path/TWAS/Official_FUSION/LDref/1000G.EUR. \
+--force_model enet \
+--chr ${CHR} \
+--out Path/TWAS/GTEx_TWAS_by_chr/SleepApnea_chr${CHR}.out
+let CHR-=1
+done
+
+
+#brain gene TWAS
+CHR=22
+until [ $CHR -lt 1 ]
+do
+Path/R-4.3.1/bin/Rscript.exe Path/TWAS/Official_FUSION/fusion_twas-master/FUSION.assoc_test.R \
+--sumstats Path/datasource/GWAS_data/SleepApnea_TWAS_format.txt \
+--weights Path/datasource/TWAS_weight/GTExv8.EUR.Brain_Frontal_Cortex_BA9.pos \
+--weights_dir Path/datasource/TWAS_weight/ \
+--ref_ld_chr Path/TWAS/Official_FUSION/LDref/1000G.EUR. \
+--force_model enet \
+--chr ${CHR} \
+--out Path/TWAS/GTExBrain_TWAS_by_chr/SleepApnea_chr${CHR}.out
+let CHR-=1
+done
+```
+
+## `TWAS_SleepApnea_Rcode.Rmd`
+
+```{r "TWAS_SleepApnea_Rcode.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: TWAS_SleepApnea_Rcode.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(openxlsx)
+library(readxl)
+library(dplyr)
+library(readr)
+library(GenomicRanges)
+library(rtracklayer)
+library(data.table)
+
+# ---------------------------------------------------------------------------
+# Chunk: Merge blood TWAS results and export
+# ---------------------------------------------------------------------------
+rm(list = ls())
+results <- tibble()
+for (chr in 1:22) {
+    results <- rbind(results, read_tsv(paste0("Path/TWAS/GTEx_TWAS_by_chr/SleepApnea_chr", chr, ".out")))
+    if(chr==6){
+        results <- rbind(results, read_tsv(paste0("Path/TWAS/GTEx_TWAS_by_chr/SleepApnea_chr6.out.MHC")))
+    }
+}
+#FDR correction
+results$TWAS.P.FDR<-NA
+results_temp<-subset(results,results$TWAS.P!=0)
+results<-results[-which(results$ID %in% results_temp$ID),]
+results_temp$TWAS.P.FDR<-p.adjust(results_temp$TWAS.P,method = "fdr",n = length(results_temp$TWAS.P))
+results<-rbind(results_temp,results)
+write.xlsx(results,"Path/TWAS/BloodGene_SleepApnea_TWAS.xlsx")
+
+#Select the significant TWAS results
+TWAS_res<-subset(results,results$TWAS.P.FDR<0.05)
+write.xlsx(TWAS_res,"Path/TWAS/BloodGene_SleepApnea_TWAS_Sig.xlsx")
+
+# ---------------------------------------------------------------------------
+# Chunk: Merge brain TWAS results and export
+# ---------------------------------------------------------------------------
+rm(list = ls())
+results <- tibble()
+for (chr in 1:22) {
+    results <- rbind(results, read_tsv(paste0("Path/TWAS/GTExBrain_TWAS_by_chr/SleepApnea_chr", chr, ".out")))
+    if(chr==6){
+        results <- rbind(results,read_tsv(paste0("Path/TWAS/GTExBrain_TWAS_by_chr/SleepApnea_chr6.out.MHC")))
+    }
+}
+results$ID_Gene<- substring(results$ID,17,)
+#FDR correction
+results$TWAS.P.FDR<-NA
+results_temp<-subset(results,results$TWAS.P!=0)
+results<-results[-which(results$ID %in% results_temp$ID),]
+results_temp$TWAS.P.FDR<-p.adjust(results_temp$TWAS.P,method = "fdr",n = length(results_temp$TWAS.P))
+results<-rbind(results_temp,results)
+write.xlsx(results,"Path/TWAS/BrainGene_SleepApnea_TWAS.xlsx")
+
+#Select the significant TWAS results
+TWAS_res<-subset(results,results$TWAS.P.FDR<0.05)
+write.xlsx(TWAS_res,"Path/TWAS/BrainGene_SleepApnea_TWAS_Sig.xlsx")
+```
+

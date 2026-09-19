@@ -1,0 +1,1016 @@
+---
+title: "SMR: summary-data-based Mendelian randomization (merged code)"
+output: html_document
+---
+
+```{r global-options, include=FALSE}
+# Code chunks are shown but not executed: the analysis needs the input files of the
+# study, which are not part of this code repository. Set eval = TRUE (or run a chunk
+# manually) after the paths below have been pointed at your own copy of the data.
+knitr::opts_chunk$set(echo = TRUE, eval = FALSE)
+```
+
+# SMR
+
+This document merges every source file of the SMR folder. The SMR 1.3.1 executable is
+used to test whether the effect of a gene or of a plasma protein on obstructive sleep
+apnea and on the five overnight oximetry traits is mediated by a shared cis-acting
+variant, and the HEIDI test is used to separate pleiotropy from linkage.
+
+The shell scripts build the besd files from the pQTL summary statistics and run the
+SMR tests for the blood and brain layers; the R scripts collect the per-chromosome
+results, apply the FDR correction and export the significant probes/genes.
+
+## Notes on the merged code
+
+* Each section below holds one source file of this folder, and the file name is given
+  both in the section heading and in the first comment line of the chunk.
+* Every path that pointed at the analysis tree of the original workstation is rewritten
+  to a short relative path below the placeholder root `Path/`; `Path/datasource/` stands
+  for the input data, `Path/R-4.3.1/bin/` for the R interpreter and
+  `Path/SMR/smr-1.3.1-win-x86_64/` for the SMR executable. Point them at your own
+  installation before running the code.
+* The Chinese comments and chunk titles of the original scripts are given in English;
+  the date of the original document header is not part of this merged file.
+* Shell scripts are kept in their own `bash` chunks.
+
+---
+
+## `SMReQTL_AHI_code.txt`
+
+```{bash "SMReQTL_AHI_code.txt", eval=FALSE}
+# ===========================================================================
+# Source file: SMReQTL_AHI_code.txt (shell script)
+# ===========================================================================
+#blood mRNA SMR
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --gwas-summary Path/datasource/GWAS_data/AHI_SMR.txt --beqtl-summary Path/datasource/eQTL_data/Whole_Blood/Whole_Blood --maf 0.01 --out Path/SMR/Blood_AHI --thread-num 10
+
+cat Sig_Blood_AHI_gene.txt | while read line;
+do
+echo "Now extracting gene:"$line
+var=${line:0:(-1)};
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --beqtl-summary Path/datasource/eQTL_data/Whole_Blood/Whole_Blood --query 1 --probe "$var" --out Path/datasource/eQTL_data/Whole_Blood/AHI/blood_"$var"
+echo "Gene "$var" has finished"
+done
+
+
+#brain mRNA SMR
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --gwas-summary Path/datasource/GWAS_data/AHI_SMR.txt --beqtl-summary Path/datasource/eQTL_data/Brain_Frontal_Cortex_BA9/Brain_Frontal_Cortex_BA9 --maf 0.01 --out Path/SMR/Brain_AHI --thread-num 10
+
+cat Sig_Brain_AHI_gene.txt | while read line;
+do
+echo "Now extracting gene:"$line
+var=${line:0:(-1)};
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --beqtl-summary Path/datasource/eQTL_data/Brain_Frontal_Cortex_BA9/Brain_Frontal_Cortex_BA9 --query 1 --probe "$var" --out Path/datasource/eQTL_data/Brain_Frontal_Cortex_BA9/AHI/brain_"$var"
+echo "Gene "$var" has finished"
+done
+```
+
+## `SMReQTL_AHI_Rcode.Rmd`
+
+```{r "SMReQTL_AHI_Rcode.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: SMReQTL_AHI_Rcode.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(openxlsx)
+library(readxl)
+library(dplyr)
+library(readr)
+library(data.table)
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the blood mRNA SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/SMR/")
+
+results<-read.delim("Blood_AHI.smr",header = TRUE,stringsAsFactors = FALSE)
+
+Sig_TWAS<-read_excel("Path/TWAS/BloodGene_AHI_TWAS_Sig.xlsx",sheet = "Sheet 1")
+Sig_TWAS$ID_t<- substring(Sig_TWAS$ID,1,15)
+results<-results[which(results$probeID %in% Sig_TWAS$ID_t),]
+results$fdr<-p.adjust(results$p_SMR,method = "fdr",n = length(results$p_SMR))
+results$BETA<-paste(round(results$b_SMR,3)," (",round(results$b_SMR-1.96*results$se_SMR,3),"-",round(results$b_SMR+1.96*results$se_SMR,3),")",sep = "")
+results$OR<-paste(round(exp(results$b_SMR),3)," (",round(exp(results$b_SMR-1.96*results$se_SMR),3),"-",round(exp(results$b_SMR+1.96*results$se_SMR),3),")",sep = "")
+write.xlsx(results,"ALL_Blood_AHI.xlsx")
+results<-subset(results,results$fdr<0.05)
+results<-subset(results,results$p_HEIDI>0.01)
+write.xlsx(results,"Sig_Blood_AHI.xlsx")
+
+write.table(results$probeID,"Sig_Blood_AHI_gene.txt",row.names = F,col.names = F,quote = FALSE)
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the brain mRNA SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/SMR/")
+
+results<-read.delim("Brain_AHI.smr",header = TRUE,stringsAsFactors = FALSE)
+
+Sig_TWAS<-read_excel("Path/TWAS/BrainGene_AHI_TWAS_Sig.xlsx",sheet = "Sheet 1")
+Sig_TWAS$ID_t<- substring(Sig_TWAS$ID,1,15)
+results<-results[which(results$probeID %in% Sig_TWAS$ID_t),]
+results$fdr<-p.adjust(results$p_SMR,method = "fdr",n = length(results$p_SMR))
+results$BETA<-paste(round(results$b_SMR,3)," (",round(results$b_SMR-1.96*results$se_SMR,3),"-",round(results$b_SMR+1.96*results$se_SMR,3),")",sep = "")
+results$OR<-paste(round(exp(results$b_SMR),3)," (",round(exp(results$b_SMR-1.96*results$se_SMR),3),"-",round(exp(results$b_SMR+1.96*results$se_SMR),3),")",sep = "")
+write.xlsx(results,"ALL_Brain_AHI.xlsx")
+results<-subset(results,results$fdr<0.05)
+results<-subset(results,results$p_HEIDI>0.01)
+write.xlsx(results,"Sig_Brain_AHI.xlsx")
+
+write.table(results$probeID,"Sig_Brain_AHI_gene.txt",row.names = F,col.names = F,quote = FALSE)
+```
+
+## `SMReQTL_AvgDesat_code.txt`
+
+```{bash "SMReQTL_AvgDesat_code.txt", eval=FALSE}
+# ===========================================================================
+# Source file: SMReQTL_AvgDesat_code.txt (shell script)
+# ===========================================================================
+#blood mRNA SMR
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --gwas-summary Path/datasource/GWAS_data/AvgDesat_SMR.txt --beqtl-summary Path/datasource/eQTL_data/Whole_Blood/Whole_Blood --maf 0.01 --out Path/SMR/Blood_AvgDesat --thread-num 10
+
+cat Sig_Blood_AvgDesat_gene.txt | while read line;
+do
+echo "Now extracting gene:"$line
+var=${line:0:(-1)};
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --beqtl-summary Path/datasource/eQTL_data/Whole_Blood/Whole_Blood --query 1 --probe "$var" --out Path/datasource/eQTL_data/Whole_Blood/AvgDesat/blood_"$var"
+echo "Gene "$var" has finished"
+done
+
+
+#brain mRNA SMR
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --gwas-summary Path/datasource/GWAS_data/AvgDesat_SMR.txt --beqtl-summary Path/datasource/eQTL_data/Brain_Frontal_Cortex_BA9/Brain_Frontal_Cortex_BA9 --maf 0.01 --out Path/SMR/Brain_AvgDesat --thread-num 10
+
+cat Sig_Brain_AvgDesat_gene.txt | while read line;
+do
+echo "Now extracting gene:"$line
+var=${line:0:(-1)};
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --beqtl-summary Path/datasource/eQTL_data/Brain_Frontal_Cortex_BA9/Brain_Frontal_Cortex_BA9 --query 1 --probe "$var" --out Path/datasource/eQTL_data/Brain_Frontal_Cortex_BA9/AvgDesat/brain_"$var"
+echo "Gene "$var" has finished"
+done
+```
+
+## `SMReQTL_AvgDesat_Rcode.Rmd`
+
+```{r "SMReQTL_AvgDesat_Rcode.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: SMReQTL_AvgDesat_Rcode.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(openxlsx)
+library(readxl)
+library(dplyr)
+library(readr)
+library(data.table)
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the blood mRNA SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/SMR/")
+
+results<-read.delim("Blood_AvgDesat.smr",header = TRUE,stringsAsFactors = FALSE)
+
+Sig_TWAS<-read_excel("Path/TWAS/BloodGene_AvgDesat_TWAS_Sig.xlsx",sheet = "Sheet 1")
+Sig_TWAS$ID_t<- substring(Sig_TWAS$ID,1,15)
+results<-results[which(results$probeID %in% Sig_TWAS$ID_t),]
+results$fdr<-p.adjust(results$p_SMR,method = "fdr",n = length(results$p_SMR))
+results$BETA<-paste(round(results$b_SMR,3)," (",round(results$b_SMR-1.96*results$se_SMR,3),"-",round(results$b_SMR+1.96*results$se_SMR,3),")",sep = "")
+results$OR<-paste(round(exp(results$b_SMR),3)," (",round(exp(results$b_SMR-1.96*results$se_SMR),3),"-",round(exp(results$b_SMR+1.96*results$se_SMR),3),")",sep = "")
+write.xlsx(results,"ALL_Blood_AvgDesat.xlsx")
+results<-subset(results,results$fdr<0.05)
+results<-subset(results,results$p_HEIDI>0.01)
+write.xlsx(results,"Sig_Blood_AvgDesat.xlsx")
+
+write.table(results$probeID,"Sig_Blood_AvgDesat_gene.txt",row.names = F,col.names = F,quote = FALSE)
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the brain mRNA SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/SMR/")
+
+results<-read.delim("Brain_AvgDesat.smr",header = TRUE,stringsAsFactors = FALSE)
+
+Sig_TWAS<-read_excel("Path/TWAS/BrainGene_AvgDesat_TWAS_Sig.xlsx",sheet = "Sheet 1")
+Sig_TWAS$ID_t<- substring(Sig_TWAS$ID,1,15)
+results<-results[which(results$probeID %in% Sig_TWAS$ID_t),]
+results$fdr<-p.adjust(results$p_SMR,method = "fdr",n = length(results$p_SMR))
+results$BETA<-paste(round(results$b_SMR,3)," (",round(results$b_SMR-1.96*results$se_SMR,3),"-",round(results$b_SMR+1.96*results$se_SMR,3),")",sep = "")
+results$OR<-paste(round(exp(results$b_SMR),3)," (",round(exp(results$b_SMR-1.96*results$se_SMR),3),"-",round(exp(results$b_SMR+1.96*results$se_SMR),3),")",sep = "")
+write.xlsx(results,"ALL_Brain_AvgDesat.xlsx")
+results<-subset(results,results$fdr<0.05)
+results<-subset(results,results$p_HEIDI>0.01)
+write.xlsx(results,"Sig_Brain_AvgDesat.xlsx")
+
+write.table(results$probeID,"Sig_Brain_AvgDesat_gene.txt",row.names = F,col.names = F,quote = FALSE)
+```
+
+## `SMReQTL_AvgSpo2_code.txt`
+
+```{bash "SMReQTL_AvgSpo2_code.txt", eval=FALSE}
+# ===========================================================================
+# Source file: SMReQTL_AvgSpo2_code.txt (shell script)
+# ===========================================================================
+#blood mRNA SMR
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --gwas-summary Path/datasource/GWAS_data/AvgSpo2_SMR.txt --beqtl-summary Path/datasource/eQTL_data/Whole_Blood/Whole_Blood --maf 0.01 --out Path/SMR/Blood_AvgSpo2 --thread-num 10
+
+cat Sig_Blood_AvgSpo2_gene.txt | while read line;
+do
+echo "Now extracting gene:"$line
+var=${line:0:(-1)};
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --beqtl-summary Path/datasource/eQTL_data/Whole_Blood/Whole_Blood --query 1 --probe "$var" --out Path/datasource/eQTL_data/Whole_Blood/AvgSpo2/blood_"$var"
+echo "Gene "$var" has finished"
+done
+
+
+#brain mRNA SMR
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --gwas-summary Path/datasource/GWAS_data/AvgSpo2_SMR.txt --beqtl-summary Path/datasource/eQTL_data/Brain_Frontal_Cortex_BA9/Brain_Frontal_Cortex_BA9 --maf 0.01 --out Path/SMR/Brain_AvgSpo2 --thread-num 10
+
+cat Sig_Brain_AvgSpo2_gene.txt | while read line;
+do
+echo "Now extracting gene:"$line
+var=${line:0:(-1)};
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --beqtl-summary Path/datasource/eQTL_data/Brain_Frontal_Cortex_BA9/Brain_Frontal_Cortex_BA9 --query 1 --probe "$var" --out Path/datasource/eQTL_data/Brain_Frontal_Cortex_BA9/AvgSpo2/brain_"$var"
+echo "Gene "$var" has finished"
+done
+```
+
+## `SMReQTL_AvgSpo2_Rcode.Rmd`
+
+```{r "SMReQTL_AvgSpo2_Rcode.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: SMReQTL_AvgSpo2_Rcode.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(openxlsx)
+library(readxl)
+library(dplyr)
+library(readr)
+library(data.table)
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the blood mRNA SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/SMR/")
+
+results<-read.delim("Blood_AvgSpo2.smr",header = TRUE,stringsAsFactors = FALSE)
+
+Sig_TWAS<-read_excel("Path/TWAS/BloodGene_AvgSpo2_TWAS_Sig.xlsx",sheet = "Sheet 1")
+Sig_TWAS$ID_t<- substring(Sig_TWAS$ID,1,15)
+results<-results[which(results$probeID %in% Sig_TWAS$ID_t),]
+results$fdr<-p.adjust(results$p_SMR,method = "fdr",n = length(results$p_SMR))
+results$BETA<-paste(round(results$b_SMR,3)," (",round(results$b_SMR-1.96*results$se_SMR,3),"-",round(results$b_SMR+1.96*results$se_SMR,3),")",sep = "")
+results$OR<-paste(round(exp(results$b_SMR),3)," (",round(exp(results$b_SMR-1.96*results$se_SMR),3),"-",round(exp(results$b_SMR+1.96*results$se_SMR),3),")",sep = "")
+write.xlsx(results,"ALL_Blood_AvgSpo2.xlsx")
+results<-subset(results,results$fdr<0.05)
+results<-subset(results,results$p_HEIDI>0.01)
+write.xlsx(results,"Sig_Blood_AvgSpo2.xlsx")
+
+write.table(results$probeID,"Sig_Blood_AvgSpo2_gene.txt",row.names = F,col.names = F,quote = FALSE)
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the brain mRNA SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/SMR/")
+
+results<-read.delim("Brain_AvgSpo2.smr",header = TRUE,stringsAsFactors = FALSE)
+
+Sig_TWAS<-read_excel("Path/TWAS/BrainGene_AvgSpo2_TWAS_Sig.xlsx",sheet = "Sheet 1")
+Sig_TWAS$ID_t<- substring(Sig_TWAS$ID,1,15)
+results<-results[which(results$probeID %in% Sig_TWAS$ID_t),]
+results$fdr<-p.adjust(results$p_SMR,method = "fdr",n = length(results$p_SMR))
+results$BETA<-paste(round(results$b_SMR,3)," (",round(results$b_SMR-1.96*results$se_SMR,3),"-",round(results$b_SMR+1.96*results$se_SMR,3),")",sep = "")
+results$OR<-paste(round(exp(results$b_SMR),3)," (",round(exp(results$b_SMR-1.96*results$se_SMR),3),"-",round(exp(results$b_SMR+1.96*results$se_SMR),3),")",sep = "")
+write.xlsx(results,"ALL_Brain_AvgSpo2.xlsx")
+results<-subset(results,results$fdr<0.05)
+results<-subset(results,results$p_HEIDI>0.01)
+write.xlsx(results,"Sig_Brain_AvgSpo2.xlsx")
+
+write.table(results$probeID,"Sig_Brain_AvgSpo2_gene.txt",row.names = F,col.names = F,quote = FALSE)
+```
+
+## `SMReQTL_MinSpo2_code.txt`
+
+```{bash "SMReQTL_MinSpo2_code.txt", eval=FALSE}
+# ===========================================================================
+# Source file: SMReQTL_MinSpo2_code.txt (shell script)
+# ===========================================================================
+#blood mRNA SMR
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --gwas-summary Path/datasource/GWAS_data/MinSpo2_SMR.txt --beqtl-summary Path/datasource/eQTL_data/Whole_Blood/Whole_Blood --maf 0.01 --out Path/SMR/Blood_MinSpo2 --thread-num 10
+
+cat Sig_Blood_MinSpo2_gene.txt | while read line;
+do
+echo "Now extracting gene:"$line
+var=${line:0:(-1)};
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --beqtl-summary Path/datasource/eQTL_data/Whole_Blood/Whole_Blood --query 1 --probe "$var" --out Path/datasource/eQTL_data/Whole_Blood/MinSpo2/blood_"$var"
+echo "Gene "$var" has finished"
+done
+
+
+#brain mRNA SMR
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --gwas-summary Path/datasource/GWAS_data/MinSpo2_SMR.txt --beqtl-summary Path/datasource/eQTL_data/Brain_Frontal_Cortex_BA9/Brain_Frontal_Cortex_BA9 --maf 0.01 --out Path/SMR/Brain_MinSpo2 --thread-num 10
+
+cat Sig_Brain_MinSpo2_gene.txt | while read line;
+do
+echo "Now extracting gene:"$line
+var=${line:0:(-1)};
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --beqtl-summary Path/datasource/eQTL_data/Brain_Frontal_Cortex_BA9/Brain_Frontal_Cortex_BA9 --query 1 --probe "$var" --out Path/datasource/eQTL_data/Brain_Frontal_Cortex_BA9/MinSpo2/brain_"$var"
+echo "Gene "$var" has finished"
+done
+```
+
+## `SMReQTL_MinSpo2_Rcode.Rmd`
+
+```{r "SMReQTL_MinSpo2_Rcode.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: SMReQTL_MinSpo2_Rcode.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(openxlsx)
+library(readxl)
+library(dplyr)
+library(readr)
+library(data.table)
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the blood mRNA SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/SMR/")
+
+results<-read.delim("Blood_MinSpo2.smr",header = TRUE,stringsAsFactors = FALSE)
+
+Sig_TWAS<-read_excel("Path/TWAS/BloodGene_MinSpo2_TWAS_Sig.xlsx",sheet = "Sheet 1")
+Sig_TWAS$ID_t<- substring(Sig_TWAS$ID,1,15)
+results<-results[which(results$probeID %in% Sig_TWAS$ID_t),]
+results$fdr<-p.adjust(results$p_SMR,method = "fdr",n = length(results$p_SMR))
+results$BETA<-paste(round(results$b_SMR,3)," (",round(results$b_SMR-1.96*results$se_SMR,3),"-",round(results$b_SMR+1.96*results$se_SMR,3),")",sep = "")
+results$OR<-paste(round(exp(results$b_SMR),3)," (",round(exp(results$b_SMR-1.96*results$se_SMR),3),"-",round(exp(results$b_SMR+1.96*results$se_SMR),3),")",sep = "")
+write.xlsx(results,"ALL_Blood_MinSpo2.xlsx")
+results<-subset(results,results$fdr<0.05)
+results<-subset(results,results$p_HEIDI>0.01)
+write.xlsx(results,"Sig_Blood_MinSpo2.xlsx")
+
+write.table(results$probeID,"Sig_Blood_MinSpo2_gene.txt",row.names = F,col.names = F,quote = FALSE)
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the brain mRNA SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/SMR/")
+
+results<-read.delim("Brain_MinSpo2.smr",header = TRUE,stringsAsFactors = FALSE)
+
+Sig_TWAS<-read_excel("Path/TWAS/BrainGene_MinSpo2_TWAS_Sig.xlsx",sheet = "Sheet 1")
+Sig_TWAS$ID_t<- substring(Sig_TWAS$ID,1,15)
+results<-results[which(results$probeID %in% Sig_TWAS$ID_t),]
+results$fdr<-p.adjust(results$p_SMR,method = "fdr",n = length(results$p_SMR))
+results$BETA<-paste(round(results$b_SMR,3)," (",round(results$b_SMR-1.96*results$se_SMR,3),"-",round(results$b_SMR+1.96*results$se_SMR,3),")",sep = "")
+results$OR<-paste(round(exp(results$b_SMR),3)," (",round(exp(results$b_SMR-1.96*results$se_SMR),3),"-",round(exp(results$b_SMR+1.96*results$se_SMR),3),")",sep = "")
+write.xlsx(results,"ALL_Brain_MinSpo2.xlsx")
+results<-subset(results,results$fdr<0.05)
+results<-subset(results,results$p_HEIDI>0.01)
+write.xlsx(results,"Sig_Brain_MinSpo2.xlsx")
+
+write.table(results$probeID,"Sig_Brain_MinSpo2_gene.txt",row.names = F,col.names = F,quote = FALSE)
+```
+
+## `SMReQTL_Per90_code.txt`
+
+```{bash "SMReQTL_Per90_code.txt", eval=FALSE}
+# ===========================================================================
+# Source file: SMReQTL_Per90_code.txt (shell script)
+# ===========================================================================
+#blood mRNA SMR
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --gwas-summary Path/datasource/GWAS_data/Per90_SMR.txt --beqtl-summary Path/datasource/eQTL_data/Whole_Blood/Whole_Blood --maf 0.01 --out Path/SMR/Blood_Per90 --thread-num 10
+
+cat Sig_Blood_Per90_gene.txt | while read line;
+do
+echo "Now extracting gene:"$line
+var=${line:0:(-1)};
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --beqtl-summary Path/datasource/eQTL_data/Whole_Blood/Whole_Blood --query 1 --probe "$var" --out Path/datasource/eQTL_data/Whole_Blood/Per90/blood_"$var"
+echo "Gene "$var" has finished"
+done
+
+
+#brain mRNA SMR
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --gwas-summary Path/datasource/GWAS_data/Per90_SMR.txt --beqtl-summary Path/datasource/eQTL_data/Brain_Frontal_Cortex_BA9/Brain_Frontal_Cortex_BA9 --maf 0.01 --out Path/SMR/Brain_Per90 --thread-num 10
+
+cat Sig_Brain_Per90_gene.txt | while read line;
+do
+echo "Now extracting gene:"$line
+var=${line:0:(-1)};
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --beqtl-summary Path/datasource/eQTL_data/Brain_Frontal_Cortex_BA9/Brain_Frontal_Cortex_BA9 --query 1 --probe "$var" --out Path/datasource/eQTL_data/Brain_Frontal_Cortex_BA9/Per90/brain_"$var"
+echo "Gene "$var" has finished"
+done
+```
+
+## `SMReQTL_Per90_Rcode.Rmd`
+
+```{r "SMReQTL_Per90_Rcode.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: SMReQTL_Per90_Rcode.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(openxlsx)
+library(readxl)
+library(dplyr)
+library(readr)
+library(data.table)
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the blood mRNA SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/SMR/")
+
+results<-read.delim("Blood_Per90.smr",header = TRUE,stringsAsFactors = FALSE)
+
+Sig_TWAS<-read_excel("Path/TWAS/BloodGene_Per90_TWAS_Sig.xlsx",sheet = "Sheet 1")
+Sig_TWAS$ID_t<- substring(Sig_TWAS$ID,1,15)
+results<-results[which(results$probeID %in% Sig_TWAS$ID_t),]
+results$fdr<-p.adjust(results$p_SMR,method = "fdr",n = length(results$p_SMR))
+results$BETA<-paste(round(results$b_SMR,3)," (",round(results$b_SMR-1.96*results$se_SMR,3),"-",round(results$b_SMR+1.96*results$se_SMR,3),")",sep = "")
+results$OR<-paste(round(exp(results$b_SMR),3)," (",round(exp(results$b_SMR-1.96*results$se_SMR),3),"-",round(exp(results$b_SMR+1.96*results$se_SMR),3),")",sep = "")
+write.xlsx(results,"ALL_Blood_Per90.xlsx")
+results<-subset(results,results$fdr<0.05)
+results<-subset(results,results$p_HEIDI>0.01)
+write.xlsx(results,"Sig_Blood_Per90.xlsx")
+
+write.table(results$probeID,"Sig_Blood_Per90_gene.txt",row.names = F,col.names = F,quote = FALSE)
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the brain mRNA SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/SMR/")
+
+results<-read.delim("Brain_Per90.smr",header = TRUE,stringsAsFactors = FALSE)
+
+Sig_TWAS<-read_excel("Path/TWAS/BrainGene_Per90_TWAS_Sig.xlsx",sheet = "Sheet 1")
+Sig_TWAS$ID_t<- substring(Sig_TWAS$ID,1,15)
+results<-results[which(results$probeID %in% Sig_TWAS$ID_t),]
+results$fdr<-p.adjust(results$p_SMR,method = "fdr",n = length(results$p_SMR))
+results$BETA<-paste(round(results$b_SMR,3)," (",round(results$b_SMR-1.96*results$se_SMR,3),"-",round(results$b_SMR+1.96*results$se_SMR,3),")",sep = "")
+results$OR<-paste(round(exp(results$b_SMR),3)," (",round(exp(results$b_SMR-1.96*results$se_SMR),3),"-",round(exp(results$b_SMR+1.96*results$se_SMR),3),")",sep = "")
+write.xlsx(results,"ALL_Brain_Per90.xlsx")
+results<-subset(results,results$fdr<0.05)
+results<-subset(results,results$p_HEIDI>0.01)
+write.xlsx(results,"Sig_Brain_Per90.xlsx")
+
+write.table(results$probeID,"Sig_Brain_Per90_gene.txt",row.names = F,col.names = F,quote = FALSE)
+```
+
+## `SMReQTL_SleepApnea_code.txt`
+
+```{bash "SMReQTL_SleepApnea_code.txt", eval=FALSE}
+# ===========================================================================
+# Source file: SMReQTL_SleepApnea_code.txt (shell script)
+# ===========================================================================
+#blood mRNA SMR
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --gwas-summary Path/datasource/GWAS_data/SleepApnea_SMR.txt --beqtl-summary Path/datasource/eQTL_data/Whole_Blood/Whole_Blood --maf 0.01 --out Path/SMR/Blood_SleepApnea --thread-num 10
+
+cat Sig_Blood_SleepApnea_gene.txt | while read line;
+do
+echo "Now extracting gene:"$line
+var=${line:0:(-1)};
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --beqtl-summary Path/datasource/eQTL_data/Whole_Blood/Whole_Blood --query 1 --probe "$var" --out Path/datasource/eQTL_data/Whole_Blood/SleepApnea/blood_"$var"
+echo "Gene "$var" has finished"
+done
+
+
+#brain mRNA SMR
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --gwas-summary Path/datasource/GWAS_data/SleepApnea_SMR.txt --beqtl-summary Path/datasource/eQTL_data/Brain_Frontal_Cortex_BA9/Brain_Frontal_Cortex_BA9 --maf 0.01 --out Path/SMR/Brain_SleepApnea --thread-num 10
+
+cat Sig_Brain_SleepApnea_gene.txt | while read line;
+do
+echo "Now extracting gene:"$line
+var=${line:0:(-1)};
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --beqtl-summary Path/datasource/eQTL_data/Brain_Frontal_Cortex_BA9/Brain_Frontal_Cortex_BA9 --query 1 --probe "$var" --out Path/datasource/eQTL_data/Brain_Frontal_Cortex_BA9/SleepApnea/brain_"$var"
+echo "Gene "$var" has finished"
+done
+```
+
+## `SMReQTL_SleepApnea_Rcode.Rmd`
+
+```{r "SMReQTL_SleepApnea_Rcode.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: SMReQTL_SleepApnea_Rcode.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(openxlsx)
+library(readxl)
+library(dplyr)
+library(readr)
+library(data.table)
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the blood mRNA SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/SMR/")
+
+results<-read.delim("Blood_SleepApnea.smr",header = TRUE,stringsAsFactors = FALSE)
+
+Sig_TWAS<-read_excel("Path/TWAS/BloodGene_SleepApnea_TWAS_Sig.xlsx",sheet = "Sheet 1")
+Sig_TWAS$ID_t<- substring(Sig_TWAS$ID,1,15)
+results<-results[which(results$probeID %in% Sig_TWAS$ID_t),]
+results$fdr<-p.adjust(results$p_SMR,method = "fdr",n = length(results$p_SMR))
+results$BETA<-paste(round(results$b_SMR,3)," (",round(results$b_SMR-1.96*results$se_SMR,3),"-",round(results$b_SMR+1.96*results$se_SMR,3),")",sep = "")
+results$OR<-paste(round(exp(results$b_SMR),3)," (",round(exp(results$b_SMR-1.96*results$se_SMR),3),"-",round(exp(results$b_SMR+1.96*results$se_SMR),3),")",sep = "")
+write.xlsx(results,"ALL_Blood_SleepApnea.xlsx")
+results<-subset(results,results$fdr<0.05)
+results<-subset(results,results$p_HEIDI>0.01)
+write.xlsx(results,"Sig_Blood_SleepApnea.xlsx")
+
+write.table(results$probeID,"Sig_Blood_SleepApnea_gene.txt",row.names = F,col.names = F,quote = FALSE)
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the brain mRNA SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/SMR/")
+
+results<-read.delim("Brain_SleepApnea.smr",header = TRUE,stringsAsFactors = FALSE)
+
+Sig_TWAS<-read_excel("Path/TWAS/BrainGene_SleepApnea_TWAS_Sig.xlsx",sheet = "Sheet 1")
+Sig_TWAS$ID_t<- substring(Sig_TWAS$ID,1,15)
+results<-results[which(results$probeID %in% Sig_TWAS$ID_t),]
+results$fdr<-p.adjust(results$p_SMR,method = "fdr",n = length(results$p_SMR))
+results$BETA<-paste(round(results$b_SMR,3)," (",round(results$b_SMR-1.96*results$se_SMR,3),"-",round(results$b_SMR+1.96*results$se_SMR,3),")",sep = "")
+results$OR<-paste(round(exp(results$b_SMR),3)," (",round(exp(results$b_SMR-1.96*results$se_SMR),3),"-",round(exp(results$b_SMR+1.96*results$se_SMR),3),")",sep = "")
+write.xlsx(results,"ALL_Brain_SleepApnea.xlsx")
+results<-subset(results,results$fdr<0.05)
+results<-subset(results,results$p_HEIDI>0.01)
+write.xlsx(results,"Sig_Brain_SleepApnea.xlsx")
+
+write.table(results$probeID,"Sig_Brain_SleepApnea_gene.txt",row.names = F,col.names = F,quote = FALSE)
+```
+
+## `SMRpQTL_AHI_code.txt`
+
+```{bash "SMRpQTL_AHI_code.txt", eval=FALSE}
+# ===========================================================================
+# Source file: SMRpQTL_AHI_code.txt (shell script)
+# ===========================================================================
+#plasma protein BESD format
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --eqtl-flist Path/datasource/pQTL_data/Plasma_AHI_flist.txt --make-besd --out Path/datasource/pQTL_data/Plasma_AHI_PWAS_Sig
+
+#plasma protein SMR
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --gwas-summary Path/datasource/GWAS_data/AHI_SMR.txt --beqtl-summary Path/datasource/pQTL_data/Plasma_AHI_PWAS_Sig --maf 0.01 --out Path/SMR/Plasma_AHI --thread-num 10
+
+
+#brain protein BESD format
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --eqtl-flist Path/datasource/pQTL_data/Brain_AHI_flist.txt --make-besd --out Path/datasource/pQTL_data/Brain_AHI_PWAS_Sig
+
+#brain protein SMR
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --gwas-summary Path/datasource/GWAS_data/AHI_SMR.txt --beqtl-summary Path/datasource/pQTL_data/Brain_AHI_PWAS_Sig --maf 0.01 --out Path/SMR/Brain_AHI --thread-num 10
+```
+
+## `SMRpQTL_AHI_Rcode.Rmd`
+
+```{r "SMRpQTL_AHI_Rcode.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: SMRpQTL_AHI_Rcode.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(openxlsx)
+library(readxl)
+library(dplyr)
+library(readr)
+library(data.table)
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the plasma protein SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/SMR/")
+
+results<-read.delim("Plasma_AHI.smr",header = TRUE,stringsAsFactors = FALSE)
+
+results$fdr<-p.adjust(results$p_SMR,method = "fdr",n = length(results$p_SMR))
+results$BETA<-paste(round(results$b_SMR,3)," (",round(results$b_SMR-1.96*results$se_SMR,3),"-",round(results$b_SMR+1.96*results$se_SMR,3),")",sep = "")
+results$OR<-paste(round(exp(results$b_SMR),3)," (",round(exp(results$b_SMR-1.96*results$se_SMR),3),"-",round(exp(results$b_SMR+1.96*results$se_SMR),3),")",sep = "")
+results<-results[,c("probeID","ProbeChr","Gene","Probe_bp","topSNP","topSNP_chr","topSNP_bp","A1","A2","Freq","b_GWAS","se_GWAS","p_GWAS","b_eQTL","se_eQTL","p_eQTL","b_SMR","se_SMR","BETA","OR","p_SMR","fdr","p_HEIDI","nsnp_HEIDI")]
+write.xlsx(results,"ALL_Plasma_AHI.xlsx")
+results<-subset(results,results$fdr<0.05)
+results<-subset(results,results$p_HEIDI>0.05)
+write.xlsx(results,"Sig_Plasma_AHI.xlsx")
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the brain protein SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/SMR/")
+
+results<-read.delim("Brain_AHI.smr",header = TRUE,stringsAsFactors = FALSE)
+
+results$fdr<-p.adjust(results$p_SMR,method = "fdr",n = length(results$p_SMR))
+results$BETA<-paste(round(results$b_SMR,3)," (",round(results$b_SMR-1.96*results$se_SMR,3),"-",round(results$b_SMR+1.96*results$se_SMR,3),")",sep = "")
+results$OR<-paste(round(exp(results$b_SMR),3)," (",round(exp(results$b_SMR-1.96*results$se_SMR),3),"-",round(exp(results$b_SMR+1.96*results$se_SMR),3),")",sep = "")
+results<-results[,c("probeID","ProbeChr","Gene","Probe_bp","topSNP","topSNP_chr","topSNP_bp","A1","A2","Freq","b_GWAS","se_GWAS","p_GWAS","b_eQTL","se_eQTL","p_eQTL","b_SMR","se_SMR","BETA","OR","p_SMR","fdr","p_HEIDI","nsnp_HEIDI")]
+results$Gene<- substring(results$Gene,17,)
+write.xlsx(results,"ALL_Brain_AHI.xlsx")
+results<-subset(results,results$fdr<0.05)
+results<-subset(results,results$p_HEIDI>0.05)
+write.xlsx(results,"Sig_Brain_AHI.xlsx")
+```
+
+## `SMRpQTL_AvgDesat_code.txt`
+
+```{bash "SMRpQTL_AvgDesat_code.txt", eval=FALSE}
+# ===========================================================================
+# Source file: SMRpQTL_AvgDesat_code.txt (shell script)
+# ===========================================================================
+#plasma protein BESD format
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --eqtl-flist Path/datasource/pQTL_data/Plasma_AvgDesat_flist.txt --make-besd --out Path/datasource/pQTL_data/Plasma_AvgDesat_PWAS_Sig
+
+#plasma protein SMR
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --gwas-summary Path/datasource/GWAS_data/AvgDesat_SMR.txt --beqtl-summary Path/datasource/pQTL_data/Plasma_AvgDesat_PWAS_Sig --maf 0.01 --out Path/SMR/Plasma_AvgDesat --thread-num 10
+
+
+#brain protein BESD format
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --eqtl-flist Path/datasource/pQTL_data/Brain_AvgDesat_flist.txt --make-besd --out Path/datasource/pQTL_data/Brain_AvgDesat_PWAS_Sig
+
+#brain protein SMR
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --gwas-summary Path/datasource/GWAS_data/AvgDesat_SMR.txt --beqtl-summary Path/datasource/pQTL_data/Brain_AvgDesat_PWAS_Sig --maf 0.01 --out Path/SMR/Brain_AvgDesat --thread-num 10
+```
+
+## `SMRpQTL_AvgDesat_Rcode.Rmd`
+
+```{r "SMRpQTL_AvgDesat_Rcode.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: SMRpQTL_AvgDesat_Rcode.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(openxlsx)
+library(readxl)
+library(dplyr)
+library(readr)
+library(data.table)
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the plasma protein SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/SMR/")
+
+results<-read.delim("Plasma_AvgDesat.smr",header = TRUE,stringsAsFactors = FALSE)
+
+results$fdr<-p.adjust(results$p_SMR,method = "fdr",n = length(results$p_SMR))
+results$BETA<-paste(round(results$b_SMR,3)," (",round(results$b_SMR-1.96*results$se_SMR,3),"-",round(results$b_SMR+1.96*results$se_SMR,3),")",sep = "")
+results$OR<-paste(round(exp(results$b_SMR),3)," (",round(exp(results$b_SMR-1.96*results$se_SMR),3),"-",round(exp(results$b_SMR+1.96*results$se_SMR),3),")",sep = "")
+results<-results[,c("probeID","ProbeChr","Gene","Probe_bp","topSNP","topSNP_chr","topSNP_bp","A1","A2","Freq","b_GWAS","se_GWAS","p_GWAS","b_eQTL","se_eQTL","p_eQTL","b_SMR","se_SMR","BETA","OR","p_SMR","fdr","p_HEIDI","nsnp_HEIDI")]
+write.xlsx(results,"ALL_Plasma_AvgDesat.xlsx")
+results<-subset(results,results$fdr<0.05)
+results<-subset(results,results$p_HEIDI>0.05)
+write.xlsx(results,"Sig_Plasma_AvgDesat.xlsx")
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the brain protein SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/SMR/")
+
+results<-read.delim("Brain_AvgDesat.smr",header = TRUE,stringsAsFactors = FALSE)
+
+results$fdr<-p.adjust(results$p_SMR,method = "fdr",n = length(results$p_SMR))
+results$BETA<-paste(round(results$b_SMR,3)," (",round(results$b_SMR-1.96*results$se_SMR,3),"-",round(results$b_SMR+1.96*results$se_SMR,3),")",sep = "")
+results$OR<-paste(round(exp(results$b_SMR),3)," (",round(exp(results$b_SMR-1.96*results$se_SMR),3),"-",round(exp(results$b_SMR+1.96*results$se_SMR),3),")",sep = "")
+results<-results[,c("probeID","ProbeChr","Gene","Probe_bp","topSNP","topSNP_chr","topSNP_bp","A1","A2","Freq","b_GWAS","se_GWAS","p_GWAS","b_eQTL","se_eQTL","p_eQTL","b_SMR","se_SMR","BETA","OR","p_SMR","fdr","p_HEIDI","nsnp_HEIDI")]
+results$Gene<- substring(results$Gene,17,)
+write.xlsx(results,"ALL_Brain_AvgDesat.xlsx")
+results<-subset(results,results$fdr<0.05)
+results<-subset(results,results$p_HEIDI>0.05)
+write.xlsx(results,"Sig_Brain_AvgDesat.xlsx")
+```
+
+## `SMRpQTL_AvgSpo2_code.txt`
+
+```{bash "SMRpQTL_AvgSpo2_code.txt", eval=FALSE}
+# ===========================================================================
+# Source file: SMRpQTL_AvgSpo2_code.txt (shell script)
+# ===========================================================================
+#plasma protein BESD format
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --eqtl-flist Path/datasource/pQTL_data/Plasma_AvgSpo2_flist.txt --make-besd --out Path/datasource/pQTL_data/Plasma_AvgSpo2_PWAS_Sig
+
+#plasma protein SMR
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --gwas-summary Path/datasource/GWAS_data/AvgSpo2_SMR.txt --beqtl-summary Path/datasource/pQTL_data/Plasma_AvgSpo2_PWAS_Sig --maf 0.01 --out Path/SMR/Plasma_AvgSpo2 --thread-num 10
+
+
+#brain protein BESD format
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --eqtl-flist Path/datasource/pQTL_data/Brain_AvgSpo2_flist.txt --make-besd --out Path/datasource/pQTL_data/Brain_AvgSpo2_PWAS_Sig
+
+#brain protein SMR
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --gwas-summary Path/datasource/GWAS_data/AvgSpo2_SMR.txt --beqtl-summary Path/datasource/pQTL_data/Brain_AvgSpo2_PWAS_Sig --maf 0.01 --out Path/SMR/Brain_AvgSpo2 --thread-num 10
+```
+
+## `SMRpQTL_AvgSpo2_Rcode.Rmd`
+
+```{r "SMRpQTL_AvgSpo2_Rcode.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: SMRpQTL_AvgSpo2_Rcode.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(openxlsx)
+library(readxl)
+library(dplyr)
+library(readr)
+library(data.table)
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the plasma protein SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/SMR/")
+
+results<-read.delim("Plasma_AvgSpo2.smr",header = TRUE,stringsAsFactors = FALSE)
+
+results$fdr<-p.adjust(results$p_SMR,method = "fdr",n = length(results$p_SMR))
+results$BETA<-paste(round(results$b_SMR,3)," (",round(results$b_SMR-1.96*results$se_SMR,3),"-",round(results$b_SMR+1.96*results$se_SMR,3),")",sep = "")
+results$OR<-paste(round(exp(results$b_SMR),3)," (",round(exp(results$b_SMR-1.96*results$se_SMR),3),"-",round(exp(results$b_SMR+1.96*results$se_SMR),3),")",sep = "")
+results<-results[,c("probeID","ProbeChr","Gene","Probe_bp","topSNP","topSNP_chr","topSNP_bp","A1","A2","Freq","b_GWAS","se_GWAS","p_GWAS","b_eQTL","se_eQTL","p_eQTL","b_SMR","se_SMR","BETA","OR","p_SMR","fdr","p_HEIDI","nsnp_HEIDI")]
+write.xlsx(results,"ALL_Plasma_AvgSpo2.xlsx")
+results<-subset(results,results$fdr<0.05)
+results<-subset(results,results$p_HEIDI>0.05)
+write.xlsx(results,"Sig_Plasma_AvgSpo2.xlsx")
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the brain protein SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/SMR/")
+
+results<-read.delim("Brain_AvgSpo2.smr",header = TRUE,stringsAsFactors = FALSE)
+
+results$fdr<-p.adjust(results$p_SMR,method = "fdr",n = length(results$p_SMR))
+results$BETA<-paste(round(results$b_SMR,3)," (",round(results$b_SMR-1.96*results$se_SMR,3),"-",round(results$b_SMR+1.96*results$se_SMR,3),")",sep = "")
+results$OR<-paste(round(exp(results$b_SMR),3)," (",round(exp(results$b_SMR-1.96*results$se_SMR),3),"-",round(exp(results$b_SMR+1.96*results$se_SMR),3),")",sep = "")
+results<-results[,c("probeID","ProbeChr","Gene","Probe_bp","topSNP","topSNP_chr","topSNP_bp","A1","A2","Freq","b_GWAS","se_GWAS","p_GWAS","b_eQTL","se_eQTL","p_eQTL","b_SMR","se_SMR","BETA","OR","p_SMR","fdr","p_HEIDI","nsnp_HEIDI")]
+results$Gene<- substring(results$Gene,17,)
+write.xlsx(results,"ALL_Brain_AvgSpo2.xlsx")
+results<-subset(results,results$fdr<0.05)
+results<-subset(results,results$p_HEIDI>0.05)
+write.xlsx(results,"Sig_Brain_AvgSpo2.xlsx")
+```
+
+## `SMRpQTL_MinSpo2_code.txt`
+
+```{bash "SMRpQTL_MinSpo2_code.txt", eval=FALSE}
+# ===========================================================================
+# Source file: SMRpQTL_MinSpo2_code.txt (shell script)
+# ===========================================================================
+#plasma protein BESD format
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --eqtl-flist Path/datasource/pQTL_data/Plasma_MinSpo2_flist.txt --make-besd --out Path/datasource/pQTL_data/Plasma_MinSpo2_PWAS_Sig
+
+#plasma protein SMR
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --gwas-summary Path/datasource/GWAS_data/MinSpo2_SMR.txt --beqtl-summary Path/datasource/pQTL_data/Plasma_MinSpo2_PWAS_Sig --maf 0.01 --out Path/SMR/Plasma_MinSpo2 --thread-num 10
+
+
+#brain protein BESD format
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --eqtl-flist Path/datasource/pQTL_data/Brain_MinSpo2_flist.txt --make-besd --out Path/datasource/pQTL_data/Brain_MinSpo2_PWAS_Sig
+
+#brain protein SMR
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --gwas-summary Path/datasource/GWAS_data/MinSpo2_SMR.txt --beqtl-summary Path/datasource/pQTL_data/Brain_MinSpo2_PWAS_Sig --maf 0.01 --out Path/SMR/Brain_MinSpo2 --thread-num 10
+```
+
+## `SMRpQTL_MinSpo2_Rcode.Rmd`
+
+```{r "SMRpQTL_MinSpo2_Rcode.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: SMRpQTL_MinSpo2_Rcode.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(openxlsx)
+library(readxl)
+library(dplyr)
+library(readr)
+library(data.table)
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the plasma protein SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/SMR/")
+
+results<-read.delim("Plasma_MinSpo2.smr",header = TRUE,stringsAsFactors = FALSE)
+
+results$fdr<-p.adjust(results$p_SMR,method = "fdr",n = length(results$p_SMR))
+results$BETA<-paste(round(results$b_SMR,3)," (",round(results$b_SMR-1.96*results$se_SMR,3),"-",round(results$b_SMR+1.96*results$se_SMR,3),")",sep = "")
+results$OR<-paste(round(exp(results$b_SMR),3)," (",round(exp(results$b_SMR-1.96*results$se_SMR),3),"-",round(exp(results$b_SMR+1.96*results$se_SMR),3),")",sep = "")
+results<-results[,c("probeID","ProbeChr","Gene","Probe_bp","topSNP","topSNP_chr","topSNP_bp","A1","A2","Freq","b_GWAS","se_GWAS","p_GWAS","b_eQTL","se_eQTL","p_eQTL","b_SMR","se_SMR","BETA","OR","p_SMR","fdr","p_HEIDI","nsnp_HEIDI")]
+write.xlsx(results,"ALL_Plasma_MinSpo2.xlsx")
+results<-subset(results,results$fdr<0.05)
+results<-subset(results,results$p_HEIDI>0.05)
+write.xlsx(results,"Sig_Plasma_MinSpo2.xlsx")
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the brain protein SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/SMR/")
+
+results<-read.delim("Brain_MinSpo2.smr",header = TRUE,stringsAsFactors = FALSE)
+
+results$fdr<-p.adjust(results$p_SMR,method = "fdr",n = length(results$p_SMR))
+results$BETA<-paste(round(results$b_SMR,3)," (",round(results$b_SMR-1.96*results$se_SMR,3),"-",round(results$b_SMR+1.96*results$se_SMR,3),")",sep = "")
+results$OR<-paste(round(exp(results$b_SMR),3)," (",round(exp(results$b_SMR-1.96*results$se_SMR),3),"-",round(exp(results$b_SMR+1.96*results$se_SMR),3),")",sep = "")
+results<-results[,c("probeID","ProbeChr","Gene","Probe_bp","topSNP","topSNP_chr","topSNP_bp","A1","A2","Freq","b_GWAS","se_GWAS","p_GWAS","b_eQTL","se_eQTL","p_eQTL","b_SMR","se_SMR","BETA","OR","p_SMR","fdr","p_HEIDI","nsnp_HEIDI")]
+results$Gene<- substring(results$Gene,17,)
+write.xlsx(results,"ALL_Brain_MinSpo2.xlsx")
+results<-subset(results,results$fdr<0.05)
+results<-subset(results,results$p_HEIDI>0.05)
+write.xlsx(results,"Sig_Brain_MinSpo2.xlsx")
+```
+
+## `SMRpQTL_Per90_code.txt`
+
+```{bash "SMRpQTL_Per90_code.txt", eval=FALSE}
+# ===========================================================================
+# Source file: SMRpQTL_Per90_code.txt (shell script)
+# ===========================================================================
+#plasma protein BESD format
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --eqtl-flist Path/datasource/pQTL_data/Plasma_Per90_flist.txt --make-besd --out Path/datasource/pQTL_data/Plasma_Per90_PWAS_Sig
+
+#plasma protein SMR
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --gwas-summary Path/datasource/GWAS_data/Per90_SMR.txt --beqtl-summary Path/datasource/pQTL_data/Plasma_Per90_PWAS_Sig --maf 0.01 --out Path/SMR/Plasma_Per90 --thread-num 10
+
+
+#brain protein BESD format
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --eqtl-flist Path/datasource/pQTL_data/Brain_Per90_flist.txt --make-besd --out Path/datasource/pQTL_data/Brain_Per90_PWAS_Sig
+
+#brain protein SMR
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --gwas-summary Path/datasource/GWAS_data/Per90_SMR.txt --beqtl-summary Path/datasource/pQTL_data/Brain_Per90_PWAS_Sig --maf 0.01 --out Path/SMR/Brain_Per90 --thread-num 10
+```
+
+## `SMRpQTL_Per90_Rcode.Rmd`
+
+```{r "SMRpQTL_Per90_Rcode.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: SMRpQTL_Per90_Rcode.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(openxlsx)
+library(readxl)
+library(dplyr)
+library(readr)
+library(data.table)
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the plasma protein SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/SMR/")
+
+results<-read.delim("Plasma_Per90.smr",header = TRUE,stringsAsFactors = FALSE)
+
+results$fdr<-p.adjust(results$p_SMR,method = "fdr",n = length(results$p_SMR))
+results$BETA<-paste(round(results$b_SMR,3)," (",round(results$b_SMR-1.96*results$se_SMR,3),"-",round(results$b_SMR+1.96*results$se_SMR,3),")",sep = "")
+results$OR<-paste(round(exp(results$b_SMR),3)," (",round(exp(results$b_SMR-1.96*results$se_SMR),3),"-",round(exp(results$b_SMR+1.96*results$se_SMR),3),")",sep = "")
+results<-results[,c("probeID","ProbeChr","Gene","Probe_bp","topSNP","topSNP_chr","topSNP_bp","A1","A2","Freq","b_GWAS","se_GWAS","p_GWAS","b_eQTL","se_eQTL","p_eQTL","b_SMR","se_SMR","BETA","OR","p_SMR","fdr","p_HEIDI","nsnp_HEIDI")]
+write.xlsx(results,"ALL_Plasma_Per90.xlsx")
+results<-subset(results,results$fdr<0.05)
+results<-subset(results,results$p_HEIDI>0.05)
+write.xlsx(results,"Sig_Plasma_Per90.xlsx")
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the brain protein SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/SMR/")
+
+results<-read.delim("Brain_Per90.smr",header = TRUE,stringsAsFactors = FALSE)
+
+results$fdr<-p.adjust(results$p_SMR,method = "fdr",n = length(results$p_SMR))
+results$BETA<-paste(round(results$b_SMR,3)," (",round(results$b_SMR-1.96*results$se_SMR,3),"-",round(results$b_SMR+1.96*results$se_SMR,3),")",sep = "")
+results$OR<-paste(round(exp(results$b_SMR),3)," (",round(exp(results$b_SMR-1.96*results$se_SMR),3),"-",round(exp(results$b_SMR+1.96*results$se_SMR),3),")",sep = "")
+results<-results[,c("probeID","ProbeChr","Gene","Probe_bp","topSNP","topSNP_chr","topSNP_bp","A1","A2","Freq","b_GWAS","se_GWAS","p_GWAS","b_eQTL","se_eQTL","p_eQTL","b_SMR","se_SMR","BETA","OR","p_SMR","fdr","p_HEIDI","nsnp_HEIDI")]
+results$Gene<- substring(results$Gene,17,)
+write.xlsx(results,"ALL_Brain_Per90.xlsx")
+results<-subset(results,results$fdr<0.05)
+results<-subset(results,results$p_HEIDI>0.05)
+write.xlsx(results,"Sig_Brain_Per90.xlsx")
+```
+
+## `SMRpQTL_SleepApnea_code.txt`
+
+```{bash "SMRpQTL_SleepApnea_code.txt", eval=FALSE}
+# ===========================================================================
+# Source file: SMRpQTL_SleepApnea_code.txt (shell script)
+# ===========================================================================
+#plasma protein BESD format
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --eqtl-flist Path/datasource/pQTL_data/Plasma_SleepApnea_flist.txt --make-besd --out Path/datasource/pQTL_data/Plasma_SleepApnea_PWAS_Sig
+
+#plasma protein SMR
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --gwas-summary Path/datasource/GWAS_data/SleepApnea_SMR.txt --beqtl-summary Path/datasource/pQTL_data/Plasma_SleepApnea_PWAS_Sig --maf 0.01 --out Path/SMR/Plasma_SleepApnea --thread-num 10
+
+
+#brain protein BESD format
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --eqtl-flist Path/datasource/pQTL_data/Brain_SleepApnea_flist.txt --make-besd --out Path/datasource/pQTL_data/Brain_SleepApnea_PWAS_Sig
+
+#brain protein SMR
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --gwas-summary Path/datasource/GWAS_data/SleepApnea_SMR.txt --beqtl-summary Path/datasource/pQTL_data/Brain_SleepApnea_PWAS_Sig --maf 0.01 --out Path/SMR/Brain_SleepApnea --thread-num 10
+```
+
+## `SMRpQTL_SleepApnea_Rcode.Rmd`
+
+```{r "SMRpQTL_SleepApnea_Rcode.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: SMRpQTL_SleepApnea_Rcode.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(openxlsx)
+library(readxl)
+library(dplyr)
+library(readr)
+library(data.table)
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the plasma protein SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/SMR/")
+
+results<-read.delim("Plasma_SleepApnea.smr",header = TRUE,stringsAsFactors = FALSE)
+
+results$fdr<-p.adjust(results$p_SMR,method = "fdr",n = length(results$p_SMR))
+results$BETA<-paste(round(results$b_SMR,3)," (",round(results$b_SMR-1.96*results$se_SMR,3),"-",round(results$b_SMR+1.96*results$se_SMR,3),")",sep = "")
+results$OR<-paste(round(exp(results$b_SMR),3)," (",round(exp(results$b_SMR-1.96*results$se_SMR),3),"-",round(exp(results$b_SMR+1.96*results$se_SMR),3),")",sep = "")
+results<-results[,c("probeID","ProbeChr","Gene","Probe_bp","topSNP","topSNP_chr","topSNP_bp","A1","A2","Freq","b_GWAS","se_GWAS","p_GWAS","b_eQTL","se_eQTL","p_eQTL","b_SMR","se_SMR","BETA","OR","p_SMR","fdr","p_HEIDI","nsnp_HEIDI")]
+write.xlsx(results,"ALL_Plasma_SleepApnea.xlsx")
+results<-subset(results,results$fdr<0.05)
+results<-subset(results,results$p_HEIDI>0.01)
+write.xlsx(results,"Sig_Plasma_SleepApnea.xlsx")
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the brain protein SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/SMR/")
+
+results<-read.delim("Brain_SleepApnea.smr",header = TRUE,stringsAsFactors = FALSE)
+
+results$fdr<-p.adjust(results$p_SMR,method = "fdr",n = length(results$p_SMR))
+results$BETA<-paste(round(results$b_SMR,3)," (",round(results$b_SMR-1.96*results$se_SMR,3),"-",round(results$b_SMR+1.96*results$se_SMR,3),")",sep = "")
+results$OR<-paste(round(exp(results$b_SMR),3)," (",round(exp(results$b_SMR-1.96*results$se_SMR),3),"-",round(exp(results$b_SMR+1.96*results$se_SMR),3),")",sep = "")
+results<-results[,c("probeID","ProbeChr","Gene","Probe_bp","topSNP","topSNP_chr","topSNP_bp","A1","A2","Freq","b_GWAS","se_GWAS","p_GWAS","b_eQTL","se_eQTL","p_eQTL","b_SMR","se_SMR","BETA","OR","p_SMR","fdr","p_HEIDI","nsnp_HEIDI")]
+results$Gene_t<- substring(results$Gene,17,)
+write.xlsx(results,"ALL_Brain_SleepApnea.xlsx")
+results<-subset(results,results$fdr<0.05)
+results<-subset(results,results$p_HEIDI>0.01)
+write.xlsx(results,"Sig_Brain_SleepApnea.xlsx")
+```
+

@@ -1,0 +1,3434 @@
+---
+title: "BMI adjustment: MVMR and BMI-adjusted SMR (merged code)"
+output: html_document
+---
+
+```{r global-options, include=FALSE}
+# Code chunks are shown but not executed: the analysis needs the input files of the
+# study, which are not part of this code repository. Set eval = TRUE (or run a chunk
+# manually) after the paths below have been pointed at your own copy of the data.
+knitr::opts_chunk$set(echo = TRUE, eval = FALSE)
+```
+
+# BMIAdjustment
+
+This document merges every source file of the BMIAdjustment folder, which repeats the
+main analyses with body mass index (BMI) taken into account.
+
+The "MVMR" scripts run multivariable Mendelian randomization of BMI together with the
+prioritized genes or proteins against obstructive sleep apnea; the "BMI_*_MR" scripts
+run the BMI-to-sleep-apnea MR analysis (including the radial MR sensitivity analysis);
+and the "SMR*_bmi" scripts run the SMR analysis of the same targets against a BMI GWAS
+to test whether the target-BMI effect rather than the target-sleep apnea effect drives
+the signal.
+
+## Notes on the merged code
+
+* Each section below holds one source file of this folder, and the file name is given
+  both in the section heading and in the first comment line of the chunk.
+* Every path that pointed at the analysis tree of the original workstation is rewritten
+  to a short relative path below the placeholder root `Path/`; `Path/datasource/` stands
+  for the input data, `Path/R-4.3.1/bin/` for the R interpreter and
+  `Path/SMR/smr-1.3.1-win-x86_64/` for the SMR executable. Point them at your own
+  installation before running the code.
+* The Chinese comments and chunk titles of the original scripts are given in English;
+  the date of the original document header is not part of this merged file.
+* Shell scripts are kept in their own `bash` chunks.
+
+---
+
+## `PlasmaPro_BMI_OSA_MVMR.Rmd`
+
+```{r "PlasmaPro_BMI_OSA_MVMR.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: PlasmaPro_BMI_OSA_MVMR.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+library(TwoSampleMR) 
+#library(MRInstruments) 
+library(data.table)
+library(ieugwasr)
+library(MendelianRandomization)
+
+# ---------------------------------------------------------------------------
+# Chunk: blood gene
+# ---------------------------------------------------------------------------
+rm(list = ls())
+for (gene in c("ENSG00000116871","ENSG00000171055","ENSG00000076003","ENSG00000115159","ENSG00000106460","ENSG00000242435","ENSG00000241350","ENSG00000175164","ENSG00000133794","ENSG00000139428","ENSG00000110921","ENSG00000174373","ENSG00000141298","ENSG00000228782","ENSG00000169738","ENSG00000233622","ENSG00000131100","ENSG00000100395")) {
+
+  dat<-fread(paste("Path/datasource/eQTL_data/Whole_Blood/SleepApnea/blood_",gene,".txt",sep = ""),sep = "\t")
+  
+  setnames(dat,c("Chr","A1","A2","Freq","b","SE","p"),c("CHR","Effect_Allele","Other_Allele","FREQ","BETA","BETA_SE","P"))
+  
+  write.table(dat,file = file.path(paste("Path/MVMR/QTL_data/BloodGene/blood_",gene,".txt",sep = "")),sep = "\t",quote = FALSE,row.names = FALSE)
+
+}
+
+
+rm(list = ls())
+
+for (gene in c("ENSG00000116871","ENSG00000171055","ENSG00000076003","ENSG00000115159","ENSG00000106460","ENSG00000242435","ENSG00000241350","ENSG00000175164","ENSG00000133794","ENSG00000139428","ENSG00000110921","ENSG00000174373","ENSG00000141298","ENSG00000228782","ENSG00000169738","ENSG00000233622","ENSG00000131100","ENSG00000100395")) {
+
+filenames_exposure <- c(paste("Path/MVMR/QTL_data/BloodGene/blood_",gene,".txt",sep = ""),"Path/datasource/GWAS_data/BMI_allSNP_hg19.txt")
+filenames_outcome <- c("Path/datasource/GWAS_data/OSA_R12_allSNP_hg19.txt")
+
+exposure_dat <- mv_extract_exposures_local(
+  filenames_exposure,
+  sep = "\t",
+  snp_col = "SNP",
+  beta_col = "BETA",
+  se_col = "BETA_SE",
+  eaf_col = "FREQ",
+  effect_allele_col = "Effect_Allele",
+  other_allele_col = "Other_Allele",
+  pval_col = "P",
+  pval_threshold = 5e-08,
+  clump_r2 = 0.001,
+  clump_kb = 10000,
+  harmonise_strictness = 1,
+)
+
+outcome_dat <- read_outcome_data(
+  filenames_outcome,
+  snps = exposure_dat1$SNP,
+  phenotype_col = "OSA",
+  sep = "\t",
+  snp_col = "SNP",
+  beta_col = "BETA",
+  se_col = "BETA_SE",
+  eaf_col = "FREQ",
+  effect_allele_col = "Effect_Allele",
+  other_allele_col = "Other_Allele",
+  pval_col = "P",
+  log_pval = FALSE,
+)
+
+mvdat <- mv_harmonise_data(exposure_dat, outcome_dat)
+mvmr_res_ivw <- mv_multiple(mvdat,instrument_specific = F)
+
+
+}
+
+
+# ---------------------------------------------------------------------------
+# Chunk: plasma protein
+# ---------------------------------------------------------------------------
+rm(list = ls())
+for (gene in c("LCT","CALCOCO2","PCSK1")) {
+
+  dat<-fread(paste("Path/datasource/pQTL_data/ARIC/SleepApnea/",gene,".txt",sep = ""),sep = "\t")
+  
+  setnames(dat,c("Chr","A1","A2","Freq","Beta","se","p"),c("CHR","Effect_Allele","Other_Allele","FREQ","BETA","BETA_SE","P"))
+  
+  write.table(dat,file = file.path(paste("Path/MVMR/QTL_data/PlasmaProtein/",gene,".txt",sep = "")),sep = "\t",quote = FALSE,row.names = FALSE)
+
+}
+
+
+rm(list = ls())
+
+for (gene in c("ENSG00000116871","ENSG00000171055","ENSG00000076003","ENSG00000115159","ENSG00000106460","ENSG00000242435","ENSG00000241350","ENSG00000175164","ENSG00000133794","ENSG00000139428","ENSG00000110921","ENSG00000174373","ENSG00000141298","ENSG00000228782","ENSG00000169738","ENSG00000233622","ENSG00000131100","ENSG00000100395")) {
+
+filenames_exposure <- c(paste("Path/MVMR/QTL_data/PlasmaProtein/",gene,".txt",sep = ""),"Path/datasource/GWAS_data/BMI_allSNP_hg19.txt")
+filenames_outcome <- c("Path/datasource/GWAS_data/OSA_R12_allSNP_hg19.txt")
+
+exposure_dat <- mv_extract_exposures_local(
+  filenames_exposure,
+  phenotype_col = "Phenotype",
+  sep = "\t",
+  snp_col = "SNP",
+  beta_col = "BETA",
+  se_col = "BETA_SE",
+  eaf_col = "FREQ",
+  effect_allele_col = "Effect_Allele",
+  other_allele_col = "Other_Allele",
+  pval_col = "P",
+  pval_threshold = 5e-08,
+  clump_r2 = 0.01,
+  clump_kb = 1000,
+  harmonise_strictness = 2,
+  id_col = "id"
+)
+
+outcome_dat <- read_outcome_data(
+  filenames_outcome,
+  snps = exposure_dat$SNP,
+  phenotype_col = "Phenotype",
+  sep = "\t",
+  snp_col = "SNP",
+  beta_col = "BETA",
+  se_col = "BETA_SE",
+  eaf_col = "FREQ",
+  effect_allele_col = "Effect_Allele",
+  other_allele_col = "Other_Allele",
+  pval_col = "P",
+  log_pval = FALSE,
+  id_col = "id"
+)
+
+mvdat <- mv_harmonise_data(exposure_dat, outcome_dat)
+mvmr_res_ivw <- mv_multiple(mvdat)
+#mvmr_res_ivw <- mv_multiple(mvdat,instrument_specific = T)
+
+}
+
+
+# ---------------------------------------------------------------------------
+# Chunk: plasma protein
+# ---------------------------------------------------------------------------
+for (gene in c("LCT","CALCOCO2","PCSK1")) {
+
+  load(paste("Path/datasource/pQTL_data/Iceland/",gene,"_allSNP_hg19.RData",sep = ""))
+  
+  setnames(dat_allSNP_hg19,c("Chrom","Pos","effectAllele","otherAllele","rsids","Pval","Beta","SE"),c("CHR","BP","Effect_Allele","Other_Allele","SNP","P","BETA","BETA_SE"))
+  
+  dat_allSNP_hg19$FREQ<-NA
+  
+  write.table(dat_allSNP_hg19,file = file.path(paste("Path/MVMR/QTL_data/PlasmaProtein/",gene,".txt",sep = "")),sep = "\t",quote = FALSE,row.names = FALSE)
+
+}
+
+rm(list = ls())
+
+total_res<-data.frame(id.exposure=NA,exposure=NA,id.outcome=NA,outcome=NA,nsnp=NA,b=NA,se=NA,pval=NA)
+
+for (gene in c("LCT","PCSK1","CALCOCO2")) {
+
+filenames_exposure <- c(paste("Path/MVMR/QTL_data/PlasmaProtein/",gene,".txt",sep = ""),"Path/datasource/GWAS_data/BMI_allSNP_hg19.txt")
+filenames_outcome <- c("Path/datasource/GWAS_data/OSA_R12_allSNP_hg19.txt")
+
+options(ieugwasr_api = 'gwas-api.mrcieu.ac.uk')
+
+exposure_dat <- mv_extract_exposures_local(
+  filenames_exposure,
+  phenotype_col = "Phenotype",
+  sep = "\t",
+  snp_col = "SNP",
+  beta_col = "BETA",
+  se_col = "BETA_SE",
+  eaf_col = "FREQ",
+  effect_allele_col = "Effect_Allele",
+  other_allele_col = "Other_Allele",
+  pval_col = "P",
+  pval_threshold = 5e-08,
+  clump_r2 = 0.01,
+  clump_kb = 1000,
+  harmonise_strictness = 1,
+  id_col = "id"
+)
+
+outcome_dat <- read_outcome_data(
+  filenames_outcome,
+  snps = exposure_dat$SNP,
+  phenotype_col = "Phenotype",
+  sep = "\t",
+  snp_col = "SNP",
+  beta_col = "BETA",
+  se_col = "BETA_SE",
+  eaf_col = "FREQ",
+  effect_allele_col = "Effect_Allele",
+  other_allele_col = "Other_Allele",
+  pval_col = "P",
+  log_pval = FALSE,
+  id_col = "id"
+)
+
+mvdat <- mv_harmonise_data(exposure_dat, outcome_dat)
+mvmr_res_ivw <- mv_multiple(mvdat)
+temp_res<-mvmr_res_ivw$result
+temp_res$outcome<-"OSA"
+for (i in 1:nrow(temp_res)) {
+  if(temp_res[i,"exposure"]=="exposure1"){
+    temp_res[i,"exposure"]<-gene
+  }else{
+    temp_res[i,"exposure"]<-"BMI_2018"
+  }
+}
+
+total_res<-rbind(total_res,temp_res)
+
+save.image(paste("Path/MVMR/Process_File/Plasma_",gene,"_BMI_OSA_MVMR.RData",sep = ""))
+
+}
+
+total_res<-total_res[-1,]
+total_res$BETA<-paste(round(total_res$b,3)," (",round(total_res$b-1.96*total_res$se,3),"-",round(total_res$b+1.96*total_res$se,3),")",sep = "")
+total_res$OR<-paste(round(exp(total_res$b),3)," (",round(exp(total_res$b-1.96*total_res$se),3),"-",round(exp(total_res$b+1.96*total_res$se),3),")",sep = "")
+
+write.xlsx(total_res,"Path/MVMR/PlasmaPro_BMI_OSA_MVMR.xlsx")
+```
+
+## `BloodBrainGene_BMI_OSA_MVMR.Rmd`
+
+```{r "BloodBrainGene_BMI_OSA_MVMR.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: BloodBrainGene_BMI_OSA_MVMR.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(dplyr)
+library(data.table)
+library(readxl)
+library(openxlsx)
+library(TwoSampleMR)
+library(ieugwasr)
+library(stringr)
+
+# ---------------------------------------------------------------------------
+# Chunk: blood gene data
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+dat<-fread("Path/datasource/eQTL_data/Whole_Blood.tsv.gz")
+
+setnames(dat,c("rsid","ref","alt","chromosome","beta","se","pvalue"),c("SNP","Effect_Allele","Other_Allele","CHR","BETA","BETA_SE","P"))
+
+
+for (gene in c("ENSG00000116871","ENSG00000171055","ENSG00000076003","ENSG00000115159","ENSG00000106460","ENSG00000242435","ENSG00000241350","ENSG00000175164","ENSG00000133794","ENSG00000139428","ENSG00000110921","ENSG00000174373","ENSG00000141298","ENSG00000228782","ENSG00000169738","ENSG00000233622","ENSG00000131100","ENSG00000100395")) {
+  
+  temp_dat<-subset(dat,dat$gene_id==gene)
+  
+  if(nrow(temp_dat)==0){
+    next
+  }
+  
+  temp_dat$CHR<-as.integer(temp_dat$CHR)
+  temp_dat$FREQ<-NA
+  temp_dat$FREQ<-as.double(temp_dat$FREQ)
+  temp_dat$maf<-as.double(temp_dat$maf)
+
+  for (i in 1:nrow(temp_dat)) {
+  if(as.double(temp_dat[i,"maf"])<0.5){
+    temp_dat[i,"FREQ"]=1-as.double(temp_dat[i,"maf"])
+  }else{
+    temp_dat[i,"FREQ"]=as.double(temp_dat[i,"maf"])
+  }
+  }
+  
+  write.table(temp_dat,file = file.path(paste("Path/16.MVMR/QTL_data/BloodGene/",gene,".txt",sep = "")),sep = "\t",quote = FALSE,row.names = FALSE)
+
+}
+
+# ---------------------------------------------------------------------------
+# Chunk: blood gene mvmr
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+total_res<-data.frame(id.exposure=NA,exposure=NA,id.outcome=NA,outcome=NA,nsnp=NA,b=NA,se=NA,pval=NA)
+
+for (gene in c("ENSG00000171055","ENSG00000116871","ENSG00000076003","ENSG00000115159","ENSG00000106460","ENSG00000242435","ENSG00000241350","ENSG00000175164","ENSG00000133794","ENSG00000139428","ENSG00000110921","ENSG00000174373","ENSG00000141298","ENSG00000228782","ENSG00000169738","ENSG00000233622","ENSG00000131100","ENSG00000100395")) {
+
+tryCatch({
+filenames_exposure <- c(paste("Path/16.MVMR/QTL_data/BloodGene/",gene,".txt",sep = ""),"Path/datasource/GWAS_data/BMI_allSNP_hg19.txt")
+filenames_outcome <- c("Path/datasource/GWAS_data/OSA_R12_allSNP_hg19.txt")
+
+exposure_dat <- mv_extract_exposures_local(
+  filenames_exposure,
+  phenotype_col = "Phenotype",
+  sep = "\t",
+  snp_col = "SNP",
+  beta_col = "BETA",
+  se_col = "BETA_SE",
+  eaf_col = "FREQ",
+  effect_allele_col = "Effect_Allele",
+  other_allele_col = "Other_Allele",
+  pval_col = "P",
+  pval_threshold = 5e-08,
+  clump_r2 = 0.01,
+  clump_kb = 1000,
+  harmonise_strictness = 1,
+  id_col = "id"
+)
+
+outcome_dat <- read_outcome_data(
+  filenames_outcome,
+  snps = exposure_dat$SNP,
+  phenotype_col = "Phenotype",
+  sep = "\t",
+  snp_col = "SNP",
+  beta_col = "BETA",
+  se_col = "BETA_SE",
+  eaf_col = "FREQ",
+  effect_allele_col = "Effect_Allele",
+  other_allele_col = "Other_Allele",
+  pval_col = "P",
+  log_pval = FALSE,
+  id_col = "id"
+)
+
+mvdat <- mv_harmonise_data(exposure_dat, outcome_dat)
+mvmr_res_ivw <- mv_multiple(mvdat)
+temp_res<-mvmr_res_ivw$result
+temp_res$outcome<-"OSA"
+for (i in 1:nrow(temp_res)) {
+  if(temp_res[i,"exposure"]=="exposure1"){
+    temp_res[i,"exposure"]<-gene
+  }else{
+    temp_res[i,"exposure"]<-"BMI_2018"
+  }
+}
+
+total_res<-rbind(total_res,temp_res)
+
+}, error=function(e) {})
+
+save.image(paste("Path/16.MVMR/Process_File/Blood_",gene,"_BMI_OSA_MVMR.RData",sep = ""))
+
+}
+
+total_res<-total_res[-1,]
+total_res$b<-as.double(total_res$b)
+total_res$se<-as.double(total_res$se)
+total_res$BETA<-paste(round(total_res$b,3)," (",round(total_res$b-1.96*total_res$se,3),"-",round(total_res$b+1.96*total_res$se,3),")",sep = "")
+total_res$OR<-paste(round(exp(total_res$b),3)," (",round(exp(total_res$b-1.96*total_res$se),3),"-",round(exp(total_res$b+1.96*total_res$se),3),")",sep = "")
+
+write.xlsx(total_res,"Path/16.MVMR/BloodGene_BMI_OSA_MVMR.xlsx")
+
+
+# ---------------------------------------------------------------------------
+# Chunk: brain gene data
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+total_line<-181406796
+#countLines("Path/datasource/eQTL_data/Brain_Frontal_Cortex_BA9_n.tsv/Brain_Frontal_Cortex_BA9_n.tsv")
+chunk_size<-100000
+
+for (j in seq(50700000,total_line,by = chunk_size)) {
+  dat<-fread("Path/datasource/eQTL_data/Brain_Frontal_Cortex_BA9_n.tsv/Brain_Frontal_Cortex_BA9_n.tsv", skip = j, nrows = chunk_size)
+
+  colnames(dat)<-c("variant","r2","P","molecular_trait_object_id","molecular_trait_id","maf","gene_id","median_tpm","BETA","BETA_SE","an","ac","CHR","position","Effect_Allele","Other_Allele","type","SNP")
+
+  for (gene in c("ENSG00000171055","ENSG00000145194","ENSG00000164284","ENSG00000141458","ENSG00000267289","ENSG00000015475","ENSG00000100395")) {
+
+    temp_dat<-subset(dat,dat$gene_id==gene)
+    
+    print(j)
+  
+    if(nrow(temp_dat)==0){
+      next
+    }
+  
+    temp_dat$CHR<-as.integer(temp_dat$CHR)
+    temp_dat$FREQ<-NA
+    temp_dat$FREQ<-as.double(temp_dat$FREQ)
+    temp_dat$maf<-as.double(temp_dat$maf)
+  
+    for (i in 1:nrow(temp_dat)) {
+      if(as.double(temp_dat[i,"maf"])<0.5){
+        temp_dat[i,"FREQ"]=1-as.double(temp_dat[i,"maf"])
+      }else{
+        temp_dat[i,"FREQ"]=as.double(temp_dat[i,"maf"])
+      }
+    }
+  
+    write.table(temp_dat,file = file.path(paste("Path/16.MVMR/QTL_data/BrainGene/chunk",j,"_",gene,".txt",sep = "")),sep = "\t",quote = FALSE,row.names = FALSE)
+
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Chunk: brain gene mvmr
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+total_res<-data.frame(id.exposure=NA,exposure=NA,id.outcome=NA,outcome=NA,nsnp=NA,b=NA,se=NA,pval=NA)
+
+for (gene in c("ENSG00000171055","ENSG00000145194","ENSG00000164284","ENSG00000141458","ENSG00000267289","ENSG00000015475","ENSG00000100395")) {
+
+tryCatch({
+filenames_exposure <- c(paste("Path/16.MVMR/QTL_data/BrainGene/",gene,".txt",sep = ""),"Path/datasource/GWAS_data/BMI_allSNP_hg19.txt")
+filenames_outcome <- c("Path/datasource/GWAS_data/OSA_R12_allSNP_hg19.txt")
+
+exposure_dat <- mv_extract_exposures_local(
+  filenames_exposure,
+  phenotype_col = "Phenotype",
+  sep = "\t",
+  snp_col = "SNP",
+  beta_col = "BETA",
+  se_col = "BETA_SE",
+  eaf_col = "FREQ",
+  effect_allele_col = "Effect_Allele",
+  other_allele_col = "Other_Allele",
+  pval_col = "P",
+  pval_threshold = 5e-08,
+  clump_r2 = 0.01,
+  clump_kb = 1000,
+  harmonise_strictness = 1,
+  id_col = "id"
+)
+
+outcome_dat <- read_outcome_data(
+  filenames_outcome,
+  snps = exposure_dat$SNP,
+  phenotype_col = "Phenotype",
+  sep = "\t",
+  snp_col = "SNP",
+  beta_col = "BETA",
+  se_col = "BETA_SE",
+  eaf_col = "FREQ",
+  effect_allele_col = "Effect_Allele",
+  other_allele_col = "Other_Allele",
+  pval_col = "P",
+  log_pval = FALSE,
+  id_col = "id"
+)
+
+mvdat <- mv_harmonise_data(exposure_dat, outcome_dat)
+mvmr_res_ivw <- mv_multiple(mvdat)
+temp_res<-mvmr_res_ivw$result
+temp_res$outcome<-"OSA"
+for (i in 1:nrow(temp_res)) {
+  if(temp_res[i,"exposure"]=="exposure1"){
+    temp_res[i,"exposure"]<-gene
+  }else{
+    temp_res[i,"exposure"]<-"BMI_2018"
+  }
+}
+
+total_res<-rbind(total_res,temp_res)
+
+}, error=function(e) {})
+
+save.image(paste("Path/16.MVMR/Process_File/Brain_",gene,"_BMI_OSA_MVMR.RData",sep = ""))
+print(gene)
+
+}
+
+total_res<-total_res[-1,]
+total_res$b<-as.double(total_res$b)
+total_res$se<-as.double(total_res$se)
+total_res$BETA<-paste(round(total_res$b,3)," (",round(total_res$b-1.96*total_res$se,3),"-",round(total_res$b+1.96*total_res$se,3),")",sep = "")
+total_res$OR<-paste(round(exp(total_res$b),3)," (",round(exp(total_res$b-1.96*total_res$se),3),"-",round(exp(total_res$b+1.96*total_res$se),3),")",sep = "")
+
+write.xlsx(total_res,"Path/16.MVMR/BrainGene_BMI_OSA_MVMR.xlsx")
+```
+
+## `BloodeQTLGenGene_BMI_OSA_MVMR.Rmd`
+
+```{r "BloodeQTLGenGene_BMI_OSA_MVMR.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: BloodeQTLGenGene_BMI_OSA_MVMR.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(dplyr)
+library(data.table)
+library(readxl)
+library(openxlsx)
+library(TwoSampleMR)
+library(ieugwasr)
+library(stringr)
+library(eqtlgentools)
+
+# ---------------------------------------------------------------------------
+# Chunk: cis-eQTL eQTLGen
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+eqtlgen_cis_eqtl_df<-fread("Path/datasource/eQTL_data/2019-12-11-cis-eQTLsFDR-ProbeLevel-CohortInfoRemoved-BonferroniAdded.txt.gz")
+eqtlgen_cis_eqtl_maf_df<-fread("Path/datasource/eQTL_data/2018-07-18_SNP_AF_for_AlleleB_combined_allele_counts_and_MAF_pos_added.txt.gz")
+
+dat <- mutate_beta_se_from_zscore_eqtlgen_cis_eqtl(
+  eqtlgen_cis_eqtl_df = eqtlgen_cis_eqtl_df,
+  eqtlgen_cis_eqtl_maf_df = eqtlgen_cis_eqtl_maf_df
+)
+
+setnames(dat,c("SNPChr","SNPPos","AssessedAllele","OtherAllele","NrSamples","beta","se","Pvalue","AlleleB_all"),c("CHR","BP","Effect_Allele","Other_Allele","N","BETA","BETA_SE","P","FREQ"))
+dat<-dat[,c("Gene","GeneSymbol","SNP","CHR","BP","Effect_Allele","Other_Allele","N","BETA","BETA_SE","P","FREQ")]
+save(dat,file = file.path("Path/datasource/eQTL_data/cis-eQTLs-BetaSeFreqAdded.RData"))
+
+# ---------------------------------------------------------------------------
+# Chunk: blood cis-eQTL eQTLGen
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+load("Path/datasource/eQTL_data/cis-eQTLs-BetaSeFreqAdded.RData")
+
+for (gene in c("ENSG00000116871","ENSG00000171055","ENSG00000076003","ENSG00000115159","ENSG00000106460","ENSG00000242435","ENSG00000241350","ENSG00000175164","ENSG00000133794","ENSG00000139428","ENSG00000110921","ENSG00000174373","ENSG00000141298","ENSG00000228782","ENSG00000169738","ENSG00000233622","ENSG00000131100","ENSG00000100395")) {
+  
+  temp_dat<-subset(dat,dat$Gene==gene)
+  
+  if(nrow(temp_dat)==0){
+    next
+  }
+
+  write.table(temp_dat,file = file.path(paste("Path/16.MVMR/QTL_data/BloodGene/eQTLGen_cis-eQTL_",gene,".txt",sep = "")),sep = "\t",quote = FALSE,row.names = FALSE)
+  
+  print(gene)
+
+}
+# ---------------------------------------------------------------------------
+# Chunk: trans-eQTL eQTLGen
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+eqtlgen_trans_eqtl_df<-fread("Path/datasource/eQTL_data/2018-09-04-trans-eQTLsFDR-CohortInfoRemoved-BonferroniAdded.txt.gz")
+eqtlgen_trans_eqtl_maf_df<-fread("Path/datasource/eQTL_data/2018-07-18_SNP_AF_for_AlleleB_combined_allele_counts_and_MAF_pos_added.txt.gz")
+
+dat <- mutate_beta_se_from_zscore_eqtlgen_cis_eqtl(
+  eqtlgen_cis_eqtl_df = eqtlgen_trans_eqtl_df,
+  eqtlgen_cis_eqtl_maf_df = eqtlgen_trans_eqtl_maf_df
+)
+
+setnames(dat,c("SNPChr","SNPPos","AssessedAllele","OtherAllele","NrSamples","beta","se","Pvalue","AlleleB_all"),c("CHR","BP","Effect_Allele","Other_Allele","N","BETA","BETA_SE","P","FREQ"))
+dat<-dat[,c("Gene","GeneSymbol","SNP","CHR","BP","Effect_Allele","Other_Allele","N","BETA","BETA_SE","P","FREQ")]
+save(dat,file = file.path("Path/datasource/eQTL_data/trans-eQTLs-BetaSeFreqAdded.RData"))
+
+# ---------------------------------------------------------------------------
+# Chunk: blood trans-eQTL eQTLGen
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+load("Path/datasource/eQTL_data/trans-eQTLs-BetaSeFreqAdded.RData")
+
+for (gene in c("ENSG00000116871","ENSG00000171055","ENSG00000076003","ENSG00000115159","ENSG00000106460","ENSG00000242435","ENSG00000241350","ENSG00000175164","ENSG00000133794","ENSG00000139428","ENSG00000110921","ENSG00000174373","ENSG00000141298","ENSG00000228782","ENSG00000169738","ENSG00000233622","ENSG00000131100","ENSG00000100395")) {
+  
+  temp_dat<-subset(dat,dat$Gene==gene)
+  
+  if(nrow(temp_dat)==0){
+    next
+  }
+
+  write.table(temp_dat,file = file.path(paste("Path/16.MVMR/QTL_data/BloodGene/eQTLGen_trans-eQTL_",gene,".txt",sep = "")),sep = "\t",quote = FALSE,row.names = FALSE)
+  
+  print(gene)
+
+}
+
+# ---------------------------------------------------------------------------
+# Chunk: bind cis and trans
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+for (gene in c("ENSG00000116871","ENSG00000171055","ENSG00000076003","ENSG00000115159","ENSG00000106460","ENSG00000175164","ENSG00000133794","ENSG00000139428","ENSG00000110921","ENSG00000174373","ENSG00000141298","ENSG00000228782","ENSG00000169738","ENSG00000233622","ENSG00000131100","ENSG00000100395")) {
+  
+  dat1<-fread(paste("Path/16.MVMR/QTL_data/BloodGene/eQTLGen_cis-eQTL_",gene,".txt",sep = ""))
+  dat2<-fread(paste("Path/16.MVMR/QTL_data/BloodGene/eQTLGen_trans-eQTL_",gene,".txt",sep = ""))
+  
+  dat<-rbind(dat1,dat2)
+
+  write.table(dat,file = file.path(paste("Path/16.MVMR/QTL_data/BloodGene/eQTLGen_",gene,".txt",sep = "")),sep = "\t",quote = FALSE,row.names = FALSE)
+  
+  print(gene)
+
+}
+
+# ---------------------------------------------------------------------------
+# Chunk: blood eQTL eQTLGen mvmr
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+total_res<-data.frame(id.exposure=NA,exposure=NA,id.outcome=NA,outcome=NA,nsnp=NA,b=NA,se=NA,pval=NA)
+
+for (gene in c("ENSG00000116871","ENSG00000171055","ENSG00000076003","ENSG00000115159","ENSG00000106460","ENSG00000175164","ENSG00000133794","ENSG00000139428","ENSG00000110921","ENSG00000174373","ENSG00000141298","ENSG00000228782","ENSG00000169738","ENSG00000233622","ENSG00000131100","ENSG00000100395")) {
+
+tryCatch({
+filenames_exposure <- c(paste("Path/16.MVMR/QTL_data/BloodGene/eQTLGen_",gene,".txt",sep = ""),"Path/datasource/GWAS_data/BMI_allSNP_hg19.txt")
+filenames_outcome <- c("Path/datasource/GWAS_data/OSA_R12_allSNP_hg19.txt")
+
+exposure_dat <- mv_extract_exposures_local(
+  filenames_exposure,
+  phenotype_col = "Phenotype",
+  sep = "\t",
+  snp_col = "SNP",
+  beta_col = "BETA",
+  se_col = "BETA_SE",
+  eaf_col = "FREQ",
+  effect_allele_col = "Effect_Allele",
+  other_allele_col = "Other_Allele",
+  pval_col = "P",
+  pval_threshold = 5e-08,
+  clump_r2 = 0.01,
+  clump_kb = 1000,
+  harmonise_strictness = 1,
+  id_col = "id"
+)
+
+outcome_dat <- read_outcome_data(
+  filenames_outcome,
+  snps = exposure_dat$SNP,
+  phenotype_col = "Phenotype",
+  sep = "\t",
+  snp_col = "SNP",
+  beta_col = "BETA",
+  se_col = "BETA_SE",
+  eaf_col = "FREQ",
+  effect_allele_col = "Effect_Allele",
+  other_allele_col = "Other_Allele",
+  pval_col = "P",
+  log_pval = FALSE,
+  id_col = "id"
+)
+
+mvdat <- mv_harmonise_data(exposure_dat, outcome_dat)
+mvmr_res_ivw <- mv_multiple(mvdat)
+temp_res<-mvmr_res_ivw$result
+temp_res$outcome<-"OSA"
+for (i in 1:nrow(temp_res)) {
+  if(temp_res[i,"exposure"]=="exposure1"){
+    temp_res[i,"exposure"]<-gene
+  }else{
+    temp_res[i,"exposure"]<-"BMI_2018"
+  }
+}
+
+total_res<-rbind(total_res,temp_res)
+
+}, error=function(e) {})
+
+save.image(paste("Path/16.MVMR/Process_File/BloodeQTLGen_",gene,"_BMI_OSA_MVMR.RData",sep = ""))
+
+}
+
+total_res<-total_res[-1,]
+total_res$b<-as.double(total_res$b)
+total_res$se<-as.double(total_res$se)
+total_res$BETA<-paste(round(total_res$b,3)," (",round(total_res$b-1.96*total_res$se,3),"-",round(total_res$b+1.96*total_res$se,3),")",sep = "")
+total_res$OR<-paste(round(exp(total_res$b),3)," (",round(exp(total_res$b-1.96*total_res$se),3),"-",round(exp(total_res$b+1.96*total_res$se),3),")",sep = "")
+
+write.xlsx(total_res,"Path/16.MVMR/BloodeQTLGenGene_BMI_OSA_MVMR.xlsx")
+```
+
+## `BrainBrainMetaGene_BMI_OSA_MVMR.Rmd`
+
+```{r "BrainBrainMetaGene_BMI_OSA_MVMR.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: BrainBrainMetaGene_BMI_OSA_MVMR.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(dplyr)
+library(data.table)
+library(readxl)
+library(openxlsx)
+library(TwoSampleMR)
+library(ieugwasr)
+library(stringr)
+
+# ---------------------------------------------------------------------------
+# Chunk: brain gene cis-eQTL data
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+for (gene in c("ENSG00000171055.15","ENSG00000145194.19","ENSG00000164284.15","ENSG00000141458.13","ENSG00000267289.1","ENSG00000015475.19","ENSG00000100395.15")) {
+  
+  temp_dat<-read.table(paste("Path/datasource/eQTL_data/BrainMeta_cis_eqtl_summary/brain_",gene,".txt",sep = ""),header = T,sep = "\t")
+  
+  if(nrow(temp_dat)==0){
+    next
+  }
+  
+  setnames(temp_dat,c("A1","A2","Chr","b","SE","p","Freq"),c("Effect_Allele","Other_Allele","CHR","BETA","BETA_SE","P","FREQ"))
+  
+  temp_dat$CHR<-as.integer(temp_dat$CHR)
+  
+  write.table(temp_dat,file = file.path(paste("Path/16.MVMR/QTL_data/BrainGene/BrainMeta_",gene,".txt",sep = "")),sep = "\t",quote = FALSE,row.names = FALSE)
+
+}
+
+# ---------------------------------------------------------------------------
+# Chunk: brain gene mvmr
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+total_res<-data.frame(id.exposure=NA,exposure=NA,id.outcome=NA,outcome=NA,nsnp=NA,b=NA,se=NA,pval=NA)
+
+for (gene in c("ENSG00000171055.15","ENSG00000145194.19","ENSG00000164284.15","ENSG00000141458.13","ENSG00000267289.1","ENSG00000015475.19","ENSG00000100395.15")) {
+
+tryCatch({
+filenames_exposure <- c(paste("Path/16.MVMR/QTL_data/BrainGene/BrainMeta_",gene,".txt",sep = ""),"Path/datasource/GWAS_data/BMI_allSNP_hg19.txt")
+filenames_outcome <- c("Path/datasource/GWAS_data/OSA_R12_allSNP_hg19.txt")
+
+exposure_dat <- mv_extract_exposures_local(
+  filenames_exposure,
+  phenotype_col = "Phenotype",
+  sep = "\t",
+  snp_col = "SNP",
+  beta_col = "BETA",
+  se_col = "BETA_SE",
+  eaf_col = "FREQ",
+  effect_allele_col = "Effect_Allele",
+  other_allele_col = "Other_Allele",
+  pval_col = "P",
+  pval_threshold = 5e-08,
+  clump_r2 = 0.01,
+  clump_kb = 1000,
+  harmonise_strictness = 1,
+  id_col = "id"
+)
+
+outcome_dat <- read_outcome_data(
+  filenames_outcome,
+  snps = exposure_dat$SNP,
+  phenotype_col = "Phenotype",
+  sep = "\t",
+  snp_col = "SNP",
+  beta_col = "BETA",
+  se_col = "BETA_SE",
+  eaf_col = "FREQ",
+  effect_allele_col = "Effect_Allele",
+  other_allele_col = "Other_Allele",
+  pval_col = "P",
+  log_pval = FALSE,
+  id_col = "id"
+)
+
+mvdat <- mv_harmonise_data(exposure_dat, outcome_dat)
+mvmr_res_ivw <- mv_multiple(mvdat)
+temp_res<-mvmr_res_ivw$result
+temp_res$outcome<-"OSA"
+for (i in 1:nrow(temp_res)) {
+  if(temp_res[i,"exposure"]=="exposure1"){
+    temp_res[i,"exposure"]<-gene
+  }else{
+    temp_res[i,"exposure"]<-"BMI_2018"
+  }
+}
+
+total_res<-rbind(total_res,temp_res)
+
+}, error=function(e) {})
+
+save.image(paste("Path/16.MVMR/Process_File/BrainBrainMeta_",gene,"_BMI_OSA_MVMR.RData",sep = ""))
+print(gene)
+
+}
+
+total_res<-total_res[-1,]
+total_res$b<-as.double(total_res$b)
+total_res$se<-as.double(total_res$se)
+total_res$BETA<-paste(round(total_res$b,3)," (",round(total_res$b-1.96*total_res$se,3),"-",round(total_res$b+1.96*total_res$se,3),")",sep = "")
+total_res$OR<-paste(round(exp(total_res$b),3)," (",round(exp(total_res$b-1.96*total_res$se),3),"-",round(exp(total_res$b+1.96*total_res$se),3),")",sep = "")
+
+write.xlsx(total_res,"Path/16.MVMR/BrainBrainMetaGene_BMI_OSA_MVMR.xlsx")
+```
+
+## `BMI_BloodGene_MR.Rmd`
+
+```{r "BMI_BloodGene_MR.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: BMI_BloodGene_MR.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(dplyr)
+library(data.table)
+library(readxl)
+library(openxlsx)
+library(TwoSampleMR)
+library(plinkbinr)
+library(ieugwasr)
+library(ggplot2)
+library(mr.raps)
+
+# ---------------------------------------------------------------------------
+# Chunk: setting
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+setwd("Path/BMIQTLSMR/")
+
+target<-c("ENSG00000116871","ENSG00000171055","ENSG00000076003","ENSG00000115159","ENSG00000106460","ENSG00000175164","ENSG00000133794","ENSG00000139428","ENSG00000110921","ENSG00000174373","ENSG00000141298","ENSG00000228782","ENSG00000169738","ENSG00000233622","ENSG00000131100","ENSG00000100395","ENSG00000241350","ENSG00000242435")
+target_name<-c("MAP7D1","FEZ2","MCM6","GPD2","TMEM106B","ABO","ARNTL","MMAB","MVK","RALGAPA1","SSH2","MRPL45P2","DCXR","CYP2T2P","ATP6V1E1","L3MBTL2","PMS2P11","UPK3BP1")
+
+exposure<-read.table("Path/datasource/GWAS_data/BMI_allSNP_hg19.txt",header = T,sep = "\t")
+exposure<-subset(exposure,exposure$P<5e-8)
+
+row_file<-data.frame(exposure=NA,nsnp=NA,gene=NA,merge=NA,format_row=NA,clump_row=NA,harmonise_row=NA)
+
+# ---------------------------------------------------------------------------
+# Chunk: harmonise
+# ---------------------------------------------------------------------------
+setwd("Path/BMIQTLSMR/")
+r<-0
+for (i in 1:length(target)) {
+  
+  gene<-read.table(paste("Path/datasource/eQTL_data/Whole_Blood/SleepApnea/blood_",target[i],".txt",sep = ""),header = T,sep = "\t")
+
+  setnames(gene,c("Chr","A1","A2","b"),c("CHR","Effect_Allele","Other_Allele","Beta"))
+
+  
+  r<-r+1
+  row_file[r,] <- NA
+  row_file[["gene"]][r] <- as.character(target_name[i])
+  row_file[["nsnp"]][r] <- nrow(gene)
+  row_file[["exposure"]][r] <- "BMI"
+  
+  #merge
+  merge1<-merge(exposure,gene,by=c("CHR","BP","Effect_Allele","Other_Allele"),suffixes=c(".bmi",".ge"))
+  flip_pro <- rename(exposure,Effect_Allele=Other_Allele,Other_Allele=Effect_Allele)
+  flip_pro$BETA = 0-exposure$BETA
+  merge2 <- merge(flip_pro,gene,by=c("CHR","BP","Effect_Allele","Other_Allele"),suffixes=c(".bmi",".ge"))
+  input <- rbind(merge1,merge2)
+  row_file[["merge"]][r] <- nrow(input)
+  if(nrow(input)==0){
+    next
+  }
+  
+  #format
+  exposure_format<-format_data(input,
+                          type = "exposure",header = TRUE,snps = NULL,
+                          snp_col = "SNP.bmi",chr_col = "CHR",
+                          pos_col = "BP",
+                          effect_allele_col = "Effect_Allele",
+                          other_allele_col = "Other_Allele",
+                          beta_col = "BETA",
+                          se_col = "BETA_SE",eaf_col = "FREQ",
+                          pval_col = "P",samplesize_col = "N")
+  exposure_format$exposure<-"BMI"
+  row_file[["format_row"]][r]<-nrow(exposure_format)
+  
+  #clump
+  clump_temp<-exposure_format[,c("SNP","pval.exposure")]
+  pre_clump_data <- clump_temp %>% select(rsid = SNP,pval = pval.exposure)
+  pro_SleepApnea_clump <- tryCatch({
+    ld_clump_local(pre_clump_data,
+                  clump_kb = 10000,  
+                  clump_r2 = 0.001,  
+                  clump_p = 5*10^(-8),  
+                  plink_bin = get_plink_exe(),  
+                  bfile = "Path/g1000/EUR") %>% {.$rsid}
+    }, error=function(e) {})
+  row_file[["clump_row"]][r]<-length(pro_SleepApnea_clump)
+  clump <- subset(exposure_format, SNP %in% pro_SleepApnea_clump)
+  
+  #outcome/harmonise
+  out<-tryCatch({
+    format_data(input,type = "outcome",header = TRUE,
+                      snps = clump$SNP,snp_col = "SNP.ge",chr_col = "CHR",
+                          pos_col = "BP",
+                          effect_allele_col = "Effect_Allele",
+                          other_allele_col = "Other_Allele",
+                          beta_col = "Beta",
+                          se_col = "SE",eaf_col = "Freq",
+                          pval_col = "p")
+  },error=function(e) {})
+  if(length(out)!=0)
+    out$outcome<-as.character(target_name[i])
+  
+  if(length(out)==0){
+    row_file[["harmonise_row"]][r]<-0
+  }else{
+    exp_out_har<-harmonise_data(clump,out,action = 1) 
+    row_file[["harmonise_row"]][r]<-nrow(exp_out_har)
+    save(exp_out_har,file = 
+         file.path(paste("Path/BMIQTLSMR/harmonise_data/BMI_BloodGene_",
+                         as.character(target_name[i]),"_har.RData",
+                         sep = "")))
+    write.csv(exp_out_har,file = 
+         file.path(paste("Path/BMIQTLSMR/harmonise_data/BMI_BloodGene_",
+                         as.character(target_name[i]),"_har.csv",sep = "")))
+  }
+}
+
+#save file
+write.xlsx(row_file,"BMI_BloodGene_row.xlsx")
+rm(list = ls())
+
+# ---------------------------------------------------------------------------
+# Chunk: MR
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+setwd("Path/BMIQTLSMR/")
+
+combine_all_mrresults <- function (res, het, plt, sin, ao_slc = T, Exp = F, split.exposure = F, split.outcome = F) 
+{
+    requireNamespace("plyr", quietly = TRUE)
+    het <- het[, c("id.exposure", "id.outcome", "method", "Q", 
+        "Q_df", "Q_pval")]
+       sin <- sin[grep("[:0-9:]", sin$SNP), ]
+    sin$method <- "Wald ratio"
+    names(sin)[names(sin) == "p"] <- "pval"
+    names(res)[names(res) == "method"] <- "Method"
+    names(het)[names(het) == "method"] <- "Method"
+    names(sin)[names(sin) == "method"] <- "Method"
+    res <- merge(res, het, by = c("id.outcome", "id.exposure", 
+        "Method"), all.x = T)
+    res <- plyr::rbind.fill(res, sin[, c("exposure", "outcome", 
+        "id.exposure", "id.outcome", "SNP", "b", "se", "pval", 
+        "Method")])
+    if (ao_slc) {
+        ao <- available_outcomes()
+        names(ao)[names(ao) == "nsnp"] <- "nsnps.outcome.array"
+        res <- merge(res, ao[, !names(ao) %in% c("unit", "priority", 
+            "sd", "path", "note", "filename", "access", "mr")], 
+            by.x = "id.outcome", by.y = "id")
+    }
+    res$nsnp[is.na(res$nsnp)] <- 1
+    for (i in unique(res$id.outcome)) {
+        Methods <- unique(res$Method[res$id.outcome == i])
+        Methods <- Methods[Methods != "Wald ratio"]
+        for (j in unique(Methods)) {
+            res$SNP[res$id.outcome == i & res$Method == j] <- 
+              paste(res$SNP[res$id.outcome == 
+                i & res$Method == "Wald ratio"], collapse = "; ")
+        }
+    }
+    if (Exp) {
+        res$or <- exp(res$b)
+        res$or_lci95 <- exp(res$b - res$se * 1.96)
+        res$or_uci95 <- exp(res$b + res$se * 1.96)
+    }
+    plt <- plt[, c("id.outcome", "id.exposure", "egger_intercept", 
+        "se", "pval")]
+    plt$Method <- "MR Egger"
+    names(plt)[names(plt) == "egger_intercept"] <- "intercept"
+    names(plt)[names(plt) == "se"] <- "intercept_se"
+    names(plt)[names(plt) == "pval"] <- "intercept_pval"
+    res <- merge(res, plt, by = c("id.outcome", "id.exposure", 
+        "Method"), all.x = T)
+    if (split.exposure) {
+        res <- split_exposure(res)
+    }
+    if (split.outcome) {
+        res <- split_outcome(res)
+    }
+    Cols <- c("Method", "outcome", "exposure", "nsnp", "b", "se", 
+        "pval", "intercept", "intercept_se", "intercept_pval", 
+        "Q", "Q_df", "Q_pval", "consortium", "ncase", "ncontrol", 
+        "pmid", "population")
+    res <- res[, c(names(res)[names(res) %in% Cols], names(res)[which(!names(res) %in% 
+        Cols)])]
+    return(res)
+}
+
+all_res<-data.frame(Method=NA,outcome=NA,exposure=NA,nsnp=NA,b=NA,se=NA,pval=NA,Q=NA,Q_df=NA,Q_pval=NA,intercept=NA,intercept_se=NA,intercept_pval=NA,id.outcome=NA,id.exposure=NA,exp_out_har_pair=NA)
+
+target_name<-c("MAP7D1","FEZ2","MCM6","GPD2","TMEM106B","ABO","ARNTL","MMAB","MVK","RALGAPA1","SSH2","MRPL45P2","DCXR","CYP2T2P","ATP6V1E1","L3MBTL2","PMS2P11","UPK3BP1")
+
+for (i in 1:length(target_name)) {
+
+  if(file.exists(paste("harmonise_data/BMI_BloodGene_",
+                       target_name[i],"_har.RData",sep = ""))){
+    folder_path<-paste("mr_res/BMI_BloodGene_",target_name[i],"/",sep = "")
+    dir.create(folder_path)
+
+    load(paste("harmonise_data/BMI_BloodGene_",target_name[i],"_har.RData",sep = ""))
+    
+    if(nrow(subset(exp_out_har,mr_keep==TRUE))!=0){
+      exp_out_har_mr_bindres<-data.frame(Method=NA,outcome=NA,exposure=NA,nsnp=NA,            b=NA,se=NA,pval=NA,Q=NA,Q_df=NA,Q_pval=NA,intercept=NA,intercept_se=NA,                   intercept_pval=NA,id.outcome=NA,id.exposure=NA,exp_out_har_pair=NA)
+      
+      if(nrow(subset(exp_out_har,mr_keep==TRUE))>2){
+        exp_out_har_mrdeft<-mr(exp_out_har,method_list=                               
+                              c("mr_ivw","mr_egger_regression","mr_weighted_median"))
+        exp_out_har_mrhet<-mr_heterogeneity(exp_out_har)
+        exp_out_har_mrplt<-mr_pleiotropy_test(exp_out_har)
+        exp_out_har_mrsin<-mr_singlesnp(exp_out_har)
+        exp_out_har_mrloo<-mr_leaveoneout(exp_out_har)
+
+       #plots
+       exp_out_har_scatP<-mr_scatter_plot(exp_out_har_mrdeft,exp_out_har)
+       exp_out_har_scatP
+       ggsave(exp_out_har_scatP[[1]], 
+           file=file.path(paste("mr_res/BMI_BloodGene_",target_name[i],
+                                "/BMI_BloodGene_",target_name[i],
+                                "_har_scatP.pdf",sep = "")))
+
+       exp_out_har_sinP<-mr_forest_plot(exp_out_har_mrsin)
+       exp_out_har_sinP
+       ggsave(exp_out_har_sinP[[1]], 
+           file=file.path(paste("mr_res/BMI_BloodGene_",target_name[i],
+                                "/BMI_BloodGene_",target_name[i],
+                                "_har_sinP.pdf",sep = "")))
+
+       exp_out_har_looP<-mr_leaveoneout_plot(exp_out_har_mrloo)
+       exp_out_har_looP
+       ggsave(exp_out_har_looP[[1]], 
+           file=file.path(paste("mr_res/BMI_BloodGene_",target_name[i],
+                                "/BMI_BloodGene_",target_name[i],
+                                "_har_looP.pdf",sep = "")))
+
+       exp_out_har_funnelP<-mr_funnel_plot(exp_out_har_mrsin)
+       exp_out_har_funnelP
+       ggsave(exp_out_har_funnelP[[1]], 
+           file=file.path(paste("mr_res/BMI_BloodGene_",target_name[i],
+                                "/BMI_BloodGene_",target_name[i],
+                                "_har_funnelP.pdf",sep = "")))
+
+       #combine_all_mrresults 
+       exp_out_har_mrallres<-combine_all_mrresults(res = exp_out_har_mrdeft, 
+                                           het= exp_out_har_mrhet,
+                                           plt =exp_out_har_mrplt,
+                                           sin = exp_out_har_mrsin, 
+                                           ao_slc = FALSE)
+       write.csv(exp_out_har_mrallres,file = 
+                file.path(paste("mr_res/BMI_BloodGene_",target_name[i],
+                                "/BMI_BloodGene_",target_name[i],
+                                "_har_mr_allres.csv",sep = "")))
+
+       ##subset for rbind
+       exp_out_har_mrsubres<-exp_out_har_mrallres[-which(exp_out_har_mrallres$Method==
+                                                          "Wald ratio"),]
+       exp_out_har_mrsubres<-exp_out_har_mrsubres[,c("Method","outcome","exposure","nsnp","b","se","pval","Q","Q_df","Q_pval","intercept","intercept_se","intercept_pval","id.outcome","id.exposure")]
+       write.csv(exp_out_har_mrsubres,file = 
+                file.path(paste("mr_res/BMI_BloodGene_",target_name[i],
+                                "/BMI_BloodGene_",target_name[i],
+                                "_har_mr_subres.csv",sep = "")))
+
+       #add mr.raps for weak instrumental
+       exp_out_har_mrraps<-mr.raps(b_exp = exp_out_har$beta.exposure,
+                                 b_out = exp_out_har$beta.outcome,
+                                 se_exp = exp_out_har$se.exposure,
+                                 se_out = exp_out_har$se.outcome)
+       write.csv(exp_out_har_mrraps,file= 
+                file.path(paste("mr_res/BMI_BloodGene_",target_name[i],
+                                "/BMI_BloodGene_",target_name[i],
+                                "_har_mr_rapsres.csv",sep = "")))
+
+       ##transform list to data.frame
+       exp_out_har_mrraps_re<-as.data.frame(exp_out_har_mrraps)
+
+       ##rename colnames to merge
+       setnames(exp_out_har_mrraps_re,c("beta.hat","beta.se","beta.p.value"),
+             c("b","se","pval"))
+       exp_out_har_mrraps_re$Method<-"MR RAPS"
+       exp_out_har_mrraps_re$outcome<-as.character(target_name[i])
+       exp_out_har_mrraps_re$exposure<-"BMI"
+       exp_out_har_mrraps_re$nsnp<-exp_out_har_mrdeft[1,"nsnp"]
+       exp_out_har_mrraps_re$Q<-"NA"
+       exp_out_har_mrraps_re$Q_df<-"NA"
+       exp_out_har_mrraps_re$Q_pval<-"NA"
+       exp_out_har_mrraps_re$intercept<-"NA"
+       exp_out_har_mrraps_re$intercept_se<-"NA"
+       exp_out_har_mrraps_re$intercept_pval<-"NA"
+       exp_out_har_mrraps_re$id.outcome<-"NA"
+       exp_out_har_mrraps_re$id.exposure<-"NA"
+       exp_out_har_mrraps_re<-exp_out_har_mrraps_re[,c("Method","outcome","exposure",                       "nsnp","b","se","pval","Q","Q_df","Q_pval","intercept",
+                                                       "intercept_se","intercept_pval",
+                                                       "id.outcome","id.exposure")]
+
+       #rbind mr results
+       exp_out_har_mr_bindres<-rbind(exp_out_har_mrsubres,exp_out_har_mrraps_re)
+       exp_out_har_mr_bindres$exp_out_har_pair=as.character(paste("BMI_BloodGene",target_name[i],"har",sep = "_"))
+       write.csv(exp_out_har_mr_bindres,file = 
+                file.path(paste("mr_res/BMI_BloodGene_",target_name[i],
+                                "/BMI_BloodGene_",target_name[i],
+                                "_har_mr_bindres.csv",sep = "")))
+      }else{
+       exp_out_har_mrdeft<-mr(exp_out_har)
+       exp_out_har_mr_bindres[1,"Method"]<-exp_out_har_mrdeft[1,"method"]
+       exp_out_har_mr_bindres[1,"outcome"]<-exp_out_har_mrdeft[1,"outcome"]
+       exp_out_har_mr_bindres[1,"exposure"]<-exp_out_har_mrdeft[1,"exposure"]
+       exp_out_har_mr_bindres[1,"nsnp"]<-exp_out_har_mrdeft[1,"nsnp"]
+       exp_out_har_mr_bindres[1,"b"]<-exp_out_har_mrdeft[1,"b"]
+       exp_out_har_mr_bindres[1,"se"]<-exp_out_har_mrdeft[1,"se"]
+       exp_out_har_mr_bindres[1,"pval"]<-exp_out_har_mrdeft[1,"pval"]
+       exp_out_har_mr_bindres[1,"id.outcome"]<-exp_out_har_mrdeft[1,"id.outcome"]
+       exp_out_har_mr_bindres[1,"id.exposure"]<-exp_out_har_mrdeft[1,"id.exposure"]
+       exp_out_har_mr_bindres[1,"exp_out_har_pair"]=as.character(
+        paste("BMI_BloodGene",target_name[i],"har",sep = "_"))
+       
+       #add mr.raps for weak instrumental
+       exp_out_har_mrraps<-mr.raps(b_exp = exp_out_har$beta.exposure,
+                                 b_out = exp_out_har$beta.outcome,
+                                 se_exp = exp_out_har$se.exposure,
+                                 se_out = exp_out_har$se.outcome)
+       write.csv(exp_out_har_mrraps,file= 
+                file.path(paste("mr_res/BMI_BloodGene_",target_name[i],
+                                "/BMI_BloodGene_",target_name[i],
+                                "_har_mr_rapsres.csv",sep = "")))
+
+       ##transform list to data.frame
+       exp_out_har_mrraps_re<-as.data.frame(exp_out_har_mrraps)
+
+       ##rename colnames to merge
+       setnames(exp_out_har_mrraps_re,c("beta.hat","beta.se","beta.p.value"),
+             c("b","se","pval"))
+       exp_out_har_mrraps_re$Method<-"MR RAPS"
+       exp_out_har_mrraps_re$outcome<-as.character(target_name[i])
+       exp_out_har_mrraps_re$exposure<-"BMI"
+       exp_out_har_mrraps_re$nsnp<-exp_out_har_mrdeft[1,"nsnp"]
+       exp_out_har_mrraps_re$Q<-"NA"
+       exp_out_har_mrraps_re$Q_df<-"NA"
+       exp_out_har_mrraps_re$Q_pval<-"NA"
+       exp_out_har_mrraps_re$intercept<-"NA"
+       exp_out_har_mrraps_re$intercept_se<-"NA"
+       exp_out_har_mrraps_re$intercept_pval<-"NA"
+       exp_out_har_mrraps_re$id.outcome<-exp_out_har_mrdeft[1,"id.outcome"]
+       exp_out_har_mrraps_re$id.exposure<-exp_out_har_mrdeft[1,"id.exposure"]
+       exp_out_har_mrraps_re$exp_out_har_pair=as.character(
+        paste("BMI_BloodGene",target_name[i],"har",sep = "_"))
+       exp_out_har_mrraps_re<-exp_out_har_mrraps_re[,c("Method","outcome","exposure",                       "nsnp","b","se","pval","Q","Q_df","Q_pval","intercept",
+      "intercept_se","intercept_pval","id.outcome","id.exposure","exp_out_har_pair")]
+
+       #rbind mr results
+       exp_out_har_mr_bindres<-rbind(exp_out_har_mr_bindres,exp_out_har_mrraps_re)
+       
+       write.csv(exp_out_har_mr_bindres,file = 
+                file.path(paste("mr_res/BMI_BloodGene_",target_name[i],
+                                "/BMI_BloodGene_",target_name[i],
+                                "_har_mr_bindres.csv",sep = "")))
+      }
+      all_res<-rbind(all_res,exp_out_har_mr_bindres)
+      
+    }else{
+      exp_out_har_mr_bindres<-data.frame(Method=NA,outcome=NA,exposure=NA,nsnp=NA,            b=NA,se=NA,pval=NA,Q=NA,Q_df=NA,Q_pval=NA,intercept=NA,intercept_se=NA,                   intercept_pval=NA,id.outcome=NA,id.exposure=NA,exp_out_har_pair=NA)
+      exp_out_har_mr_bindres[1,"Method"]<-"None"
+      exp_out_har_mr_bindres[1,"outcome"]<-target_name[i]
+      exp_out_har_mr_bindres[1,"exposure"]<-"BMI"
+      exp_out_har_mr_bindres[1,"nsnp"]<-nrow(exp_out_har)
+      all_res<-rbind(all_res,exp_out_har_mr_bindres)
+    }
+  }
+}
+
+#save all_res
+all_res<-all_res[-1,]
+all_res$Q_pval<-as.double(all_res$Q_pval)
+all_res$Q<-as.double(all_res$Q)
+all_res$Q_df<-as.double(all_res$Q_df)
+all_res$intercept_pval<-as.double(all_res$intercept_pval)
+all_res$intercept<-as.double(all_res$intercept)
+all_res$intercept_se<-as.double(all_res$intercept_se)
+
+all_res$BETA<-paste(round(all_res$b,3)," (",round(all_res$b-1.96*all_res$se,3),"-",round(all_res$b+1.96*all_res$se,3),")",sep = "")
+all_res$OR<-paste(round(exp(all_res$b),3)," (",round(exp(all_res$b-1.96*all_res$se),3),"-",round(exp(all_res$b+1.96*all_res$se),3),")",sep = "")
+
+write.csv(all_res,file = file.path("BMI_BloodGene_mr_bindres.csv"))
+write.xlsx(all_res,file = file.path("BMI_BloodGene_mr_bindres.xlsx"))
+
+
+# ---------------------------------------------------------------------------
+# Chunk: RadialMR
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+setwd("Path/BMIQTLSMR/")
+
+combine_all_mrresults <- function (res, het, plt, sin, ao_slc = T, Exp = F, split.exposure = F, split.outcome = F) 
+{
+    requireNamespace("plyr", quietly = TRUE)
+    het <- het[, c("id.exposure", "id.outcome", "method", "Q", 
+        "Q_df", "Q_pval")]
+       sin <- sin[grep("[:0-9:]", sin$SNP), ]
+    sin$method <- "Wald ratio"
+    names(sin)[names(sin) == "p"] <- "pval"
+    names(res)[names(res) == "method"] <- "Method"
+    names(het)[names(het) == "method"] <- "Method"
+    names(sin)[names(sin) == "method"] <- "Method"
+    res <- merge(res, het, by = c("id.outcome", "id.exposure", 
+        "Method"), all.x = T)
+    res <- plyr::rbind.fill(res, sin[, c("exposure", "outcome", 
+        "id.exposure", "id.outcome", "SNP", "b", "se", "pval", 
+        "Method")])
+    if (ao_slc) {
+        ao <- available_outcomes()
+        names(ao)[names(ao) == "nsnp"] <- "nsnps.outcome.array"
+        res <- merge(res, ao[, !names(ao) %in% c("unit", "priority", 
+            "sd", "path", "note", "filename", "access", "mr")], 
+            by.x = "id.outcome", by.y = "id")
+    }
+    res$nsnp[is.na(res$nsnp)] <- 1
+    for (i in unique(res$id.outcome)) {
+        Methods <- unique(res$Method[res$id.outcome == i])
+        Methods <- Methods[Methods != "Wald ratio"]
+        for (j in unique(Methods)) {
+            res$SNP[res$id.outcome == i & res$Method == j] <- 
+              paste(res$SNP[res$id.outcome == 
+                i & res$Method == "Wald ratio"], collapse = "; ")
+        }
+    }
+    if (Exp) {
+        res$or <- exp(res$b)
+        res$or_lci95 <- exp(res$b - res$se * 1.96)
+        res$or_uci95 <- exp(res$b + res$se * 1.96)
+    }
+    plt <- plt[, c("id.outcome", "id.exposure", "egger_intercept", 
+        "se", "pval")]
+    plt$Method <- "MR Egger"
+    names(plt)[names(plt) == "egger_intercept"] <- "intercept"
+    names(plt)[names(plt) == "se"] <- "intercept_se"
+    names(plt)[names(plt) == "pval"] <- "intercept_pval"
+    res <- merge(res, plt, by = c("id.outcome", "id.exposure", 
+        "Method"), all.x = T)
+    if (split.exposure) {
+        res <- split_exposure(res)
+    }
+    if (split.outcome) {
+        res <- split_outcome(res)
+    }
+    Cols <- c("Method", "outcome", "exposure", "nsnp", "b", "se", 
+        "pval", "intercept", "intercept_se", "intercept_pval", 
+        "Q", "Q_df", "Q_pval", "consortium", "ncase", "ncontrol", 
+        "pmid", "population")
+    res <- res[, c(names(res)[names(res) %in% Cols], names(res)[which(!names(res) %in% 
+        Cols)])]
+    return(res)
+}
+
+all_res<-data.frame(Method=NA,outcome=NA,exposure=NA,nsnp=NA,b=NA,se=NA,pval=NA,Q=NA,Q_df=NA,Q_pval=NA,intercept=NA,intercept_se=NA,intercept_pval=NA,id.outcome=NA,id.exposure=NA,exp_out_har_pair=NA)
+
+target_name<-c("PMS2P11","UPK3BP1")
+
+for (i in 1:length(target_name)) {
+
+  if(file.exists(paste("harmonise_data/BMI_BloodGene_",
+                       target_name[i],"_har.RData",sep = ""))){
+    folder_path<-paste("mr_res/BMI_BloodGene_",target_name[i],"/",sep = "")
+    dir.create(folder_path)
+
+    load(paste("harmonise_data/BMI_BloodGene_",target_name[i],"_har.RData",sep = ""))
+    
+    #radial
+    ivw_radial <- RadialMR::ivw_radial(
+    r_input = exp_out_har,
+    alpha = 0.05,
+    weights = 1
+    )
+    egger_radial <- RadialMR::egger_radial(
+    r_input = exp_out_har,
+    alpha = 0.05,
+    weights = 1
+    )
+
+    if (
+    is.character(ivw_radial[["outliers"]]) &
+      is.data.frame(egger_radial[["outliers"]])
+    ) {
+    outliers <- c(egger_radial[["outliers"]][["SNP"]])
+    exp_out_har <- exp_out_har[which(!exp_out_har$SNP %in% outliers), ]
+    }
+
+    if (
+    is.data.frame(ivw_radial[["outliers"]]) &
+      is.character(egger_radial[["outliers"]])
+    ) {
+    outliers <- c(ivw_radial[["outliers"]][["SNP"]])
+    exp_out_har <- exp_out_har[which(!exp_out_har$SNP %in% outliers), ]
+    }
+
+    if (
+    is.data.frame(ivw_radial[["outliers"]]) &
+      is.data.frame(egger_radial[["outliers"]])
+    ) {
+    outliers <- c(
+      ivw_radial[["outliers"]][["SNP"]],
+      egger_radial[["outliers"]][["SNP"]]
+    )
+    outliers <- outliers[which(duplicated(outliers) == F)]
+    exp_out_har <- exp_out_har[which(!exp_out_har$SNP %in% outliers), ]
+    }
+    
+    if(nrow(subset(exp_out_har,mr_keep==TRUE))!=0){
+      exp_out_har_mr_bindres<-data.frame(Method=NA,outcome=NA,exposure=NA,nsnp=NA,            b=NA,se=NA,pval=NA,Q=NA,Q_df=NA,Q_pval=NA,intercept=NA,intercept_se=NA,                   intercept_pval=NA,id.outcome=NA,id.exposure=NA,exp_out_har_pair=NA)
+      
+      if(nrow(subset(exp_out_har,mr_keep==TRUE))>2){
+        exp_out_har_mrdeft<-mr(exp_out_har,method_list=                               
+                              c("mr_ivw","mr_egger_regression","mr_weighted_median"))
+        exp_out_har_mrhet<-mr_heterogeneity(exp_out_har)
+        exp_out_har_mrplt<-mr_pleiotropy_test(exp_out_har)
+        exp_out_har_mrsin<-mr_singlesnp(exp_out_har)
+        exp_out_har_mrloo<-mr_leaveoneout(exp_out_har)
+
+       #plots
+       exp_out_har_scatP<-mr_scatter_plot(exp_out_har_mrdeft,exp_out_har)
+       exp_out_har_scatP
+       ggsave(exp_out_har_scatP[[1]], 
+           file=file.path(paste("mr_res/BMI_BloodGene_",target_name[i],
+                                "/BMI_BloodGene_",target_name[i],
+                                "_har_Radial_scatP.pdf",sep = "")))
+
+       exp_out_har_sinP<-mr_forest_plot(exp_out_har_mrsin)
+       exp_out_har_sinP
+       ggsave(exp_out_har_sinP[[1]], 
+           file=file.path(paste("mr_res/BMI_BloodGene_",target_name[i],
+                                "/BMI_BloodGene_",target_name[i],
+                                "_har_Radial_sinP.pdf",sep = "")))
+
+       exp_out_har_looP<-mr_leaveoneout_plot(exp_out_har_mrloo)
+       exp_out_har_looP
+       ggsave(exp_out_har_looP[[1]], 
+           file=file.path(paste("mr_res/BMI_BloodGene_",target_name[i],
+                                "/BMI_BloodGene_",target_name[i],
+                                "_har_Radial_looP.pdf",sep = "")))
+
+       exp_out_har_funnelP<-mr_funnel_plot(exp_out_har_mrsin)
+       exp_out_har_funnelP
+       ggsave(exp_out_har_funnelP[[1]], 
+           file=file.path(paste("mr_res/BMI_BloodGene_",target_name[i],
+                                "/BMI_BloodGene_",target_name[i],
+                                "_har_Radial_funnelP.pdf",sep = "")))
+
+       #combine_all_mrresults 
+       exp_out_har_mrallres<-combine_all_mrresults(res = exp_out_har_mrdeft, 
+                                           het= exp_out_har_mrhet,
+                                           plt =exp_out_har_mrplt,
+                                           sin = exp_out_har_mrsin, 
+                                           ao_slc = FALSE)
+       write.csv(exp_out_har_mrallres,file = 
+                file.path(paste("mr_res/BMI_BloodGene_",target_name[i],
+                                "/BMI_BloodGene_",target_name[i],
+                                "_har_Radial_mr_allres.csv",sep = "")))
+
+       ##subset for rbind
+       exp_out_har_mrsubres<-exp_out_har_mrallres[-which(exp_out_har_mrallres$Method==
+                                                          "Wald ratio"),]
+       exp_out_har_mrsubres<-exp_out_har_mrsubres[,c("Method","outcome","exposure","nsnp","b","se","pval","Q","Q_df","Q_pval","intercept","intercept_se","intercept_pval","id.outcome","id.exposure")]
+       write.csv(exp_out_har_mrsubres,file = 
+                file.path(paste("mr_res/BMI_BloodGene_",target_name[i],
+                                "/BMI_BloodGene_",target_name[i],
+                                "_har_Radial_mr_subres.csv",sep = "")))
+
+       #add mr.raps for weak instrumental
+       exp_out_har_mrraps<-mr.raps(b_exp = exp_out_har$beta.exposure,
+                                 b_out = exp_out_har$beta.outcome,
+                                 se_exp = exp_out_har$se.exposure,
+                                 se_out = exp_out_har$se.outcome)
+       write.csv(exp_out_har_mrraps,file= 
+                file.path(paste("mr_res/BMI_BloodGene_",target_name[i],
+                                "/BMI_BloodGene_",target_name[i],
+                                "_har_Radial_mr_rapsres.csv",sep = "")))
+
+       ##transform list to data.frame
+       exp_out_har_mrraps_re<-as.data.frame(exp_out_har_mrraps)
+
+       ##rename colnames to merge
+       setnames(exp_out_har_mrraps_re,c("beta.hat","beta.se","beta.p.value"),
+             c("b","se","pval"))
+       exp_out_har_mrraps_re$Method<-"MR RAPS"
+       exp_out_har_mrraps_re$outcome<-as.character(target_name[i])
+       exp_out_har_mrraps_re$exposure<-"BMI"
+       exp_out_har_mrraps_re$nsnp<-exp_out_har_mrdeft[1,"nsnp"]
+       exp_out_har_mrraps_re$Q<-"NA"
+       exp_out_har_mrraps_re$Q_df<-"NA"
+       exp_out_har_mrraps_re$Q_pval<-"NA"
+       exp_out_har_mrraps_re$intercept<-"NA"
+       exp_out_har_mrraps_re$intercept_se<-"NA"
+       exp_out_har_mrraps_re$intercept_pval<-"NA"
+       exp_out_har_mrraps_re$id.outcome<-"NA"
+       exp_out_har_mrraps_re$id.exposure<-"NA"
+       exp_out_har_mrraps_re<-exp_out_har_mrraps_re[,c("Method","outcome","exposure",                       "nsnp","b","se","pval","Q","Q_df","Q_pval","intercept",
+                                                       "intercept_se","intercept_pval",
+                                                       "id.outcome","id.exposure")]
+
+       #rbind mr results
+       exp_out_har_mr_bindres<-rbind(exp_out_har_mrsubres,exp_out_har_mrraps_re)
+       exp_out_har_mr_bindres$exp_out_har_pair=as.character(paste("BMI_BloodGene",target_name[i],"har",sep = "_"))
+       write.csv(exp_out_har_mr_bindres,file = 
+                file.path(paste("mr_res/BMI_BloodGene_",target_name[i],
+                                "/BMI_BloodGene_",target_name[i],
+                                "_har_Radial_mr_bindres.csv",sep = "")))
+      }else{
+       exp_out_har_mrdeft<-mr(exp_out_har)
+       exp_out_har_mr_bindres[1,"Method"]<-exp_out_har_mrdeft[1,"method"]
+       exp_out_har_mr_bindres[1,"outcome"]<-exp_out_har_mrdeft[1,"outcome"]
+       exp_out_har_mr_bindres[1,"exposure"]<-exp_out_har_mrdeft[1,"exposure"]
+       exp_out_har_mr_bindres[1,"nsnp"]<-exp_out_har_mrdeft[1,"nsnp"]
+       exp_out_har_mr_bindres[1,"b"]<-exp_out_har_mrdeft[1,"b"]
+       exp_out_har_mr_bindres[1,"se"]<-exp_out_har_mrdeft[1,"se"]
+       exp_out_har_mr_bindres[1,"pval"]<-exp_out_har_mrdeft[1,"pval"]
+       exp_out_har_mr_bindres[1,"id.outcome"]<-exp_out_har_mrdeft[1,"id.outcome"]
+       exp_out_har_mr_bindres[1,"id.exposure"]<-exp_out_har_mrdeft[1,"id.exposure"]
+       exp_out_har_mr_bindres[1,"exp_out_har_pair"]=as.character(
+        paste("BMI_BloodGene",target_name[i],"har",sep = "_"))
+       
+       #add mr.raps for weak instrumental
+       exp_out_har_mrraps<-mr.raps(b_exp = exp_out_har$beta.exposure,
+                                 b_out = exp_out_har$beta.outcome,
+                                 se_exp = exp_out_har$se.exposure,
+                                 se_out = exp_out_har$se.outcome)
+       write.csv(exp_out_har_mrraps,file= 
+                file.path(paste("mr_res/BMI_BloodGene_",target_name[i],
+                                "/BMI_BloodGene_",target_name[i],
+                                "_har_Radial_mr_rapsres.csv",sep = "")))
+
+       ##transform list to data.frame
+       exp_out_har_mrraps_re<-as.data.frame(exp_out_har_mrraps)
+
+       ##rename colnames to merge
+       setnames(exp_out_har_mrraps_re,c("beta.hat","beta.se","beta.p.value"),
+             c("b","se","pval"))
+       exp_out_har_mrraps_re$Method<-"MR RAPS"
+       exp_out_har_mrraps_re$outcome<-as.character(target_name[i])
+       exp_out_har_mrraps_re$exposure<-"BMI"
+       exp_out_har_mrraps_re$nsnp<-exp_out_har_mrdeft[1,"nsnp"]
+       exp_out_har_mrraps_re$Q<-"NA"
+       exp_out_har_mrraps_re$Q_df<-"NA"
+       exp_out_har_mrraps_re$Q_pval<-"NA"
+       exp_out_har_mrraps_re$intercept<-"NA"
+       exp_out_har_mrraps_re$intercept_se<-"NA"
+       exp_out_har_mrraps_re$intercept_pval<-"NA"
+       exp_out_har_mrraps_re$id.outcome<-exp_out_har_mrdeft[1,"id.outcome"]
+       exp_out_har_mrraps_re$id.exposure<-exp_out_har_mrdeft[1,"id.exposure"]
+       exp_out_har_mrraps_re$exp_out_har_pair=as.character(
+        paste("BMI_BloodGene",target_name[i],"har",sep = "_"))
+       exp_out_har_mrraps_re<-exp_out_har_mrraps_re[,c("Method","outcome","exposure",                       "nsnp","b","se","pval","Q","Q_df","Q_pval","intercept",
+      "intercept_se","intercept_pval","id.outcome","id.exposure","exp_out_har_pair")]
+
+       #rbind mr results
+       exp_out_har_mr_bindres<-rbind(exp_out_har_mr_bindres,exp_out_har_mrraps_re)
+       
+       write.csv(exp_out_har_mr_bindres,file = 
+                file.path(paste("mr_res/BMI_BloodGene_",target_name[i],
+                                "/BMI_BloodGene_",target_name[i],
+                                "_har_Radial_mr_bindres.csv",sep = "")))
+      }
+      all_res<-rbind(all_res,exp_out_har_mr_bindres)
+      
+    }else{
+      exp_out_har_mr_bindres<-data.frame(Method=NA,outcome=NA,exposure=NA,nsnp=NA,            b=NA,se=NA,pval=NA,Q=NA,Q_df=NA,Q_pval=NA,intercept=NA,intercept_se=NA,                   intercept_pval=NA,id.outcome=NA,id.exposure=NA,exp_out_har_pair=NA)
+      exp_out_har_mr_bindres[1,"Method"]<-"None"
+      exp_out_har_mr_bindres[1,"outcome"]<-target_name[i]
+      exp_out_har_mr_bindres[1,"exposure"]<-"BMI"
+      exp_out_har_mr_bindres[1,"nsnp"]<-nrow(exp_out_har)
+      all_res<-rbind(all_res,exp_out_har_mr_bindres)
+    }
+  }
+}
+
+#save all_res
+all_res<-all_res[-1,]
+all_res$Q_pval<-as.double(all_res$Q_pval)
+all_res$Q<-as.double(all_res$Q)
+all_res$Q_df<-as.double(all_res$Q_df)
+all_res$intercept_pval<-as.double(all_res$intercept_pval)
+all_res$intercept<-as.double(all_res$intercept)
+all_res$intercept_se<-as.double(all_res$intercept_se)
+
+all_res$BETA<-paste(round(all_res$b,3)," (",round(all_res$b-1.96*all_res$se,3),"-",round(all_res$b+1.96*all_res$se,3),")",sep = "")
+all_res$OR<-paste(round(exp(all_res$b),3)," (",round(exp(all_res$b-1.96*all_res$se),3),"-",round(exp(all_res$b+1.96*all_res$se),3),")",sep = "")
+
+write.csv(all_res,file = file.path("BMI_BloodGene_Radialmr_bindres.csv"))
+write.xlsx(all_res,file = file.path("BMI_BloodGene_Radialmr_bindres.xlsx"))
+```
+
+## `BMI_BrainGene_MR.Rmd`
+
+```{r "BMI_BrainGene_MR.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: BMI_BrainGene_MR.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(dplyr)
+library(data.table)
+library(readxl)
+library(openxlsx)
+library(TwoSampleMR)
+library(plinkbinr)
+library(ieugwasr)
+library(ggplot2)
+library(mr.raps)
+
+# ---------------------------------------------------------------------------
+# Chunk: setting
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+setwd("Path/BMIQTLSMR/")
+
+target<-c("ENSG00000171055","ENSG00000145194","ENSG00000164284","ENSG00000141458","ENSG00000267289","ENSG00000015475","ENSG00000100395")
+target_name<-c("FEZ2","ECE2","GRPEL2","NPC1","CTD-2623N2.11","BID","L3MBTL2")
+
+exposure<-read.table("Path/datasource/GWAS_data/BMI_allSNP_hg19.txt",header = T,sep = "\t")
+exposure<-subset(exposure,exposure$P<5e-8)
+
+row_file<-data.frame(exposure=NA,nsnp=NA,gene=NA,merge=NA,format_row=NA,clump_row=NA,harmonise_row=NA)
+
+# ---------------------------------------------------------------------------
+# Chunk: harmonise
+# ---------------------------------------------------------------------------
+setwd("Path/BMIQTLSMR/")
+r<-0
+for (i in 1:length(target)) {
+  
+  gene<-read.table(paste("Path/datasource/eQTL_data/Brain_Frontal_Cortex_BA9/SleepApnea/brain_",target[i],".txt",sep = ""),header = T,sep = "\t")
+
+  setnames(gene,c("Chr","A1","A2","b"),c("CHR","Effect_Allele","Other_Allele","Beta"))
+
+  
+  r<-r+1
+  row_file[r,] <- NA
+  row_file[["gene"]][r] <- as.character(target_name[i])
+  row_file[["nsnp"]][r] <- nrow(gene)
+  row_file[["exposure"]][r] <- "BMI"
+  
+  #merge
+  merge1<-merge(exposure,gene,by=c("CHR","BP","Effect_Allele","Other_Allele"),suffixes=c(".bmi",".ge"))
+  flip_pro <- rename(exposure,Effect_Allele=Other_Allele,Other_Allele=Effect_Allele)
+  flip_pro$BETA = 0-exposure$BETA
+  merge2 <- merge(flip_pro,gene,by=c("CHR","BP","Effect_Allele","Other_Allele"),suffixes=c(".bmi",".ge"))
+  input <- rbind(merge1,merge2)
+  row_file[["merge"]][r] <- nrow(input)
+  if(nrow(input)==0){
+    next
+  }
+  
+  #format
+  exposure_format<-format_data(input,
+                          type = "exposure",header = TRUE,snps = NULL,
+                          snp_col = "SNP.bmi",chr_col = "CHR",
+                          pos_col = "BP",
+                          effect_allele_col = "Effect_Allele",
+                          other_allele_col = "Other_Allele",
+                          beta_col = "BETA",
+                          se_col = "BETA_SE",eaf_col = "FREQ",
+                          pval_col = "P",samplesize_col = "N")
+  exposure_format$exposure<-"BMI"
+  row_file[["format_row"]][r]<-nrow(exposure_format)
+  
+  #clump
+  clump_temp<-exposure_format[,c("SNP","pval.exposure")]
+  pre_clump_data <- clump_temp %>% select(rsid = SNP,pval = pval.exposure)
+  pro_SleepApnea_clump <- tryCatch({
+    ld_clump_local(pre_clump_data,
+                  clump_kb = 10000,  
+                  clump_r2 = 0.001,  
+                  clump_p = 5*10^(-8),  
+                  plink_bin = get_plink_exe(),  
+                  bfile = "Path/g1000/EUR") %>% {.$rsid}
+    }, error=function(e) {})
+  row_file[["clump_row"]][r]<-length(pro_SleepApnea_clump)
+  clump <- subset(exposure_format, SNP %in% pro_SleepApnea_clump)
+  
+  #outcome/harmonise
+  out<-tryCatch({
+    format_data(input,type = "outcome",header = TRUE,
+                      snps = clump$SNP,snp_col = "SNP.ge",chr_col = "CHR",
+                          pos_col = "BP",
+                          effect_allele_col = "Effect_Allele",
+                          other_allele_col = "Other_Allele",
+                          beta_col = "Beta",
+                          se_col = "SE",eaf_col = "Freq",
+                          pval_col = "p")
+  },error=function(e) {})
+  if(length(out)!=0)
+    out$outcome<-as.character(target_name[i])
+  
+  if(length(out)==0){
+    row_file[["harmonise_row"]][r]<-0
+  }else{
+    exp_out_har<-harmonise_data(clump,out,action = 1) 
+    row_file[["harmonise_row"]][r]<-nrow(exp_out_har)
+    save(exp_out_har,file = 
+         file.path(paste("Path/BMIQTLSMR/harmonise_data/BMI_BrainGene_",
+                         as.character(target_name[i]),"_har.RData",
+                         sep = "")))
+    write.csv(exp_out_har,file = 
+         file.path(paste("Path/BMIQTLSMR/harmonise_data/BMI_BrainGene_",
+                         as.character(target_name[i]),"_har.csv",sep = "")))
+  }
+}
+
+#save file
+write.xlsx(row_file,"BMI_BrainGene_row.xlsx")
+rm(list = ls())
+
+# ---------------------------------------------------------------------------
+# Chunk: MR
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+setwd("Path/BMIQTLSMR/")
+
+combine_all_mrresults <- function (res, het, plt, sin, ao_slc = T, Exp = F, split.exposure = F, split.outcome = F) 
+{
+    requireNamespace("plyr", quietly = TRUE)
+    het <- het[, c("id.exposure", "id.outcome", "method", "Q", 
+        "Q_df", "Q_pval")]
+       sin <- sin[grep("[:0-9:]", sin$SNP), ]
+    sin$method <- "Wald ratio"
+    names(sin)[names(sin) == "p"] <- "pval"
+    names(res)[names(res) == "method"] <- "Method"
+    names(het)[names(het) == "method"] <- "Method"
+    names(sin)[names(sin) == "method"] <- "Method"
+    res <- merge(res, het, by = c("id.outcome", "id.exposure", 
+        "Method"), all.x = T)
+    res <- plyr::rbind.fill(res, sin[, c("exposure", "outcome", 
+        "id.exposure", "id.outcome", "SNP", "b", "se", "pval", 
+        "Method")])
+    if (ao_slc) {
+        ao <- available_outcomes()
+        names(ao)[names(ao) == "nsnp"] <- "nsnps.outcome.array"
+        res <- merge(res, ao[, !names(ao) %in% c("unit", "priority", 
+            "sd", "path", "note", "filename", "access", "mr")], 
+            by.x = "id.outcome", by.y = "id")
+    }
+    res$nsnp[is.na(res$nsnp)] <- 1
+    for (i in unique(res$id.outcome)) {
+        Methods <- unique(res$Method[res$id.outcome == i])
+        Methods <- Methods[Methods != "Wald ratio"]
+        for (j in unique(Methods)) {
+            res$SNP[res$id.outcome == i & res$Method == j] <- 
+              paste(res$SNP[res$id.outcome == 
+                i & res$Method == "Wald ratio"], collapse = "; ")
+        }
+    }
+    if (Exp) {
+        res$or <- exp(res$b)
+        res$or_lci95 <- exp(res$b - res$se * 1.96)
+        res$or_uci95 <- exp(res$b + res$se * 1.96)
+    }
+    plt <- plt[, c("id.outcome", "id.exposure", "egger_intercept", 
+        "se", "pval")]
+    plt$Method <- "MR Egger"
+    names(plt)[names(plt) == "egger_intercept"] <- "intercept"
+    names(plt)[names(plt) == "se"] <- "intercept_se"
+    names(plt)[names(plt) == "pval"] <- "intercept_pval"
+    res <- merge(res, plt, by = c("id.outcome", "id.exposure", 
+        "Method"), all.x = T)
+    if (split.exposure) {
+        res <- split_exposure(res)
+    }
+    if (split.outcome) {
+        res <- split_outcome(res)
+    }
+    Cols <- c("Method", "outcome", "exposure", "nsnp", "b", "se", 
+        "pval", "intercept", "intercept_se", "intercept_pval", 
+        "Q", "Q_df", "Q_pval", "consortium", "ncase", "ncontrol", 
+        "pmid", "population")
+    res <- res[, c(names(res)[names(res) %in% Cols], names(res)[which(!names(res) %in% 
+        Cols)])]
+    return(res)
+}
+
+all_res<-data.frame(Method=NA,outcome=NA,exposure=NA,nsnp=NA,b=NA,se=NA,pval=NA,Q=NA,Q_df=NA,Q_pval=NA,intercept=NA,intercept_se=NA,intercept_pval=NA,id.outcome=NA,id.exposure=NA,exp_out_har_pair=NA)
+
+target_name<-c("FEZ2","ECE2","GRPEL2","NPC1","CTD-2623N2.11","BID","L3MBTL2")
+
+for (i in 1:length(target_name)) {
+
+  if(file.exists(paste("harmonise_data/BMI_BrainGene_",
+                       target_name[i],"_har.RData",sep = ""))){
+    folder_path<-paste("mr_res/BMI_BrainGene_",target_name[i],"/",sep = "")
+    dir.create(folder_path)
+
+    load(paste("harmonise_data/BMI_BrainGene_",target_name[i],"_har.RData",sep = ""))
+    
+    if(nrow(subset(exp_out_har,mr_keep==TRUE))!=0){
+      exp_out_har_mr_bindres<-data.frame(Method=NA,outcome=NA,exposure=NA,nsnp=NA,            b=NA,se=NA,pval=NA,Q=NA,Q_df=NA,Q_pval=NA,intercept=NA,intercept_se=NA,                   intercept_pval=NA,id.outcome=NA,id.exposure=NA,exp_out_har_pair=NA)
+      
+      if(nrow(subset(exp_out_har,mr_keep==TRUE))>2){
+        exp_out_har_mrdeft<-mr(exp_out_har,method_list=                               
+                              c("mr_ivw","mr_egger_regression","mr_weighted_median"))
+        exp_out_har_mrhet<-mr_heterogeneity(exp_out_har)
+        exp_out_har_mrplt<-mr_pleiotropy_test(exp_out_har)
+        exp_out_har_mrsin<-mr_singlesnp(exp_out_har)
+        exp_out_har_mrloo<-mr_leaveoneout(exp_out_har)
+
+       #plots
+       exp_out_har_scatP<-mr_scatter_plot(exp_out_har_mrdeft,exp_out_har)
+       exp_out_har_scatP
+       ggsave(exp_out_har_scatP[[1]], 
+           file=file.path(paste("mr_res/BMI_BrainGene_",target_name[i],
+                                "/BMI_BrainGene_",target_name[i],
+                                "_har_scatP.pdf",sep = "")))
+
+       exp_out_har_sinP<-mr_forest_plot(exp_out_har_mrsin)
+       exp_out_har_sinP
+       ggsave(exp_out_har_sinP[[1]], 
+           file=file.path(paste("mr_res/BMI_BrainGene_",target_name[i],
+                                "/BMI_BrainGene_",target_name[i],
+                                "_har_sinP.pdf",sep = "")))
+
+       exp_out_har_looP<-mr_leaveoneout_plot(exp_out_har_mrloo)
+       exp_out_har_looP
+       ggsave(exp_out_har_looP[[1]], 
+           file=file.path(paste("mr_res/BMI_BrainGene_",target_name[i],
+                                "/BMI_BrainGene_",target_name[i],
+                                "_har_looP.pdf",sep = "")))
+
+       exp_out_har_funnelP<-mr_funnel_plot(exp_out_har_mrsin)
+       exp_out_har_funnelP
+       ggsave(exp_out_har_funnelP[[1]], 
+           file=file.path(paste("mr_res/BMI_BrainGene_",target_name[i],
+                                "/BMI_BrainGene_",target_name[i],
+                                "_har_funnelP.pdf",sep = "")))
+
+       #combine_all_mrresults 
+       exp_out_har_mrallres<-combine_all_mrresults(res = exp_out_har_mrdeft, 
+                                           het= exp_out_har_mrhet,
+                                           plt =exp_out_har_mrplt,
+                                           sin = exp_out_har_mrsin, 
+                                           ao_slc = FALSE)
+       write.csv(exp_out_har_mrallres,file = 
+                file.path(paste("mr_res/BMI_BrainGene_",target_name[i],
+                                "/BMI_BrainGene_",target_name[i],
+                                "_har_mr_allres.csv",sep = "")))
+
+       ##subset for rbind
+       exp_out_har_mrsubres<-exp_out_har_mrallres[-which(exp_out_har_mrallres$Method==
+                                                          "Wald ratio"),]
+       exp_out_har_mrsubres<-exp_out_har_mrsubres[,c("Method","outcome","exposure","nsnp","b","se","pval","Q","Q_df","Q_pval","intercept","intercept_se","intercept_pval","id.outcome","id.exposure")]
+       write.csv(exp_out_har_mrsubres,file = 
+                file.path(paste("mr_res/BMI_BrainGene_",target_name[i],
+                                "/BMI_BrainGene_",target_name[i],
+                                "_har_mr_subres.csv",sep = "")))
+
+       #add mr.raps for weak instrumental
+       exp_out_har_mrraps<-mr.raps(b_exp = exp_out_har$beta.exposure,
+                                 b_out = exp_out_har$beta.outcome,
+                                 se_exp = exp_out_har$se.exposure,
+                                 se_out = exp_out_har$se.outcome)
+       write.csv(exp_out_har_mrraps,file= 
+                file.path(paste("mr_res/BMI_BrainGene_",target_name[i],
+                                "/BMI_BrainGene_",target_name[i],
+                                "_har_mr_rapsres.csv",sep = "")))
+
+       ##transform list to data.frame
+       exp_out_har_mrraps_re<-as.data.frame(exp_out_har_mrraps)
+
+       ##rename colnames to merge
+       setnames(exp_out_har_mrraps_re,c("beta.hat","beta.se","beta.p.value"),
+             c("b","se","pval"))
+       exp_out_har_mrraps_re$Method<-"MR RAPS"
+       exp_out_har_mrraps_re$outcome<-as.character(target_name[i])
+       exp_out_har_mrraps_re$exposure<-"BMI"
+       exp_out_har_mrraps_re$nsnp<-exp_out_har_mrdeft[1,"nsnp"]
+       exp_out_har_mrraps_re$Q<-"NA"
+       exp_out_har_mrraps_re$Q_df<-"NA"
+       exp_out_har_mrraps_re$Q_pval<-"NA"
+       exp_out_har_mrraps_re$intercept<-"NA"
+       exp_out_har_mrraps_re$intercept_se<-"NA"
+       exp_out_har_mrraps_re$intercept_pval<-"NA"
+       exp_out_har_mrraps_re$id.outcome<-"NA"
+       exp_out_har_mrraps_re$id.exposure<-"NA"
+       exp_out_har_mrraps_re<-exp_out_har_mrraps_re[,c("Method","outcome","exposure",                       "nsnp","b","se","pval","Q","Q_df","Q_pval","intercept",
+                                                       "intercept_se","intercept_pval",
+                                                       "id.outcome","id.exposure")]
+
+       #rbind mr results
+       exp_out_har_mr_bindres<-rbind(exp_out_har_mrsubres,exp_out_har_mrraps_re)
+       exp_out_har_mr_bindres$exp_out_har_pair=as.character(paste("BMI_BrainGene",target_name[i],"har",sep = "_"))
+       write.csv(exp_out_har_mr_bindres,file = 
+                file.path(paste("mr_res/BMI_BrainGene_",target_name[i],
+                                "/BMI_BrainGene_",target_name[i],
+                                "_har_mr_bindres.csv",sep = "")))
+      }else{
+       exp_out_har_mrdeft<-mr(exp_out_har)
+       exp_out_har_mr_bindres[1,"Method"]<-exp_out_har_mrdeft[1,"method"]
+       exp_out_har_mr_bindres[1,"outcome"]<-exp_out_har_mrdeft[1,"outcome"]
+       exp_out_har_mr_bindres[1,"exposure"]<-exp_out_har_mrdeft[1,"exposure"]
+       exp_out_har_mr_bindres[1,"nsnp"]<-exp_out_har_mrdeft[1,"nsnp"]
+       exp_out_har_mr_bindres[1,"b"]<-exp_out_har_mrdeft[1,"b"]
+       exp_out_har_mr_bindres[1,"se"]<-exp_out_har_mrdeft[1,"se"]
+       exp_out_har_mr_bindres[1,"pval"]<-exp_out_har_mrdeft[1,"pval"]
+       exp_out_har_mr_bindres[1,"id.outcome"]<-exp_out_har_mrdeft[1,"id.outcome"]
+       exp_out_har_mr_bindres[1,"id.exposure"]<-exp_out_har_mrdeft[1,"id.exposure"]
+       exp_out_har_mr_bindres[1,"exp_out_har_pair"]=as.character(
+        paste("BMI_BrainGene",target_name[i],"har",sep = "_"))
+       
+       #add mr.raps for weak instrumental
+       exp_out_har_mrraps<-mr.raps(b_exp = exp_out_har$beta.exposure,
+                                 b_out = exp_out_har$beta.outcome,
+                                 se_exp = exp_out_har$se.exposure,
+                                 se_out = exp_out_har$se.outcome)
+       write.csv(exp_out_har_mrraps,file= 
+                file.path(paste("mr_res/BMI_BrainGene_",target_name[i],
+                                "/BMI_BrainGene_",target_name[i],
+                                "_har_mr_rapsres.csv",sep = "")))
+
+       ##transform list to data.frame
+       exp_out_har_mrraps_re<-as.data.frame(exp_out_har_mrraps)
+
+       ##rename colnames to merge
+       setnames(exp_out_har_mrraps_re,c("beta.hat","beta.se","beta.p.value"),
+             c("b","se","pval"))
+       exp_out_har_mrraps_re$Method<-"MR RAPS"
+       exp_out_har_mrraps_re$outcome<-as.character(target_name[i])
+       exp_out_har_mrraps_re$exposure<-"BMI"
+       exp_out_har_mrraps_re$nsnp<-exp_out_har_mrdeft[1,"nsnp"]
+       exp_out_har_mrraps_re$Q<-"NA"
+       exp_out_har_mrraps_re$Q_df<-"NA"
+       exp_out_har_mrraps_re$Q_pval<-"NA"
+       exp_out_har_mrraps_re$intercept<-"NA"
+       exp_out_har_mrraps_re$intercept_se<-"NA"
+       exp_out_har_mrraps_re$intercept_pval<-"NA"
+       exp_out_har_mrraps_re$id.outcome<-exp_out_har_mrdeft[1,"id.outcome"]
+       exp_out_har_mrraps_re$id.exposure<-exp_out_har_mrdeft[1,"id.exposure"]
+       exp_out_har_mrraps_re$exp_out_har_pair=as.character(
+        paste("BMI_BrainGene",target_name[i],"har",sep = "_"))
+       exp_out_har_mrraps_re<-exp_out_har_mrraps_re[,c("Method","outcome","exposure",                       "nsnp","b","se","pval","Q","Q_df","Q_pval","intercept",
+      "intercept_se","intercept_pval","id.outcome","id.exposure","exp_out_har_pair")]
+
+       #rbind mr results
+       exp_out_har_mr_bindres<-rbind(exp_out_har_mr_bindres,exp_out_har_mrraps_re)
+       
+       write.csv(exp_out_har_mr_bindres,file = 
+                file.path(paste("mr_res/BMI_BrainGene_",target_name[i],
+                                "/BMI_BrainGene_",target_name[i],
+                                "_har_mr_bindres.csv",sep = "")))
+      }
+      all_res<-rbind(all_res,exp_out_har_mr_bindres)
+      
+    }else{
+      exp_out_har_mr_bindres<-data.frame(Method=NA,outcome=NA,exposure=NA,nsnp=NA,            b=NA,se=NA,pval=NA,Q=NA,Q_df=NA,Q_pval=NA,intercept=NA,intercept_se=NA,                   intercept_pval=NA,id.outcome=NA,id.exposure=NA,exp_out_har_pair=NA)
+      exp_out_har_mr_bindres[1,"Method"]<-"None"
+      exp_out_har_mr_bindres[1,"outcome"]<-target_name[i]
+      exp_out_har_mr_bindres[1,"exposure"]<-"BMI"
+      exp_out_har_mr_bindres[1,"nsnp"]<-nrow(exp_out_har)
+      all_res<-rbind(all_res,exp_out_har_mr_bindres)
+    }
+  }
+}
+
+#save all_res
+all_res<-all_res[-1,]
+all_res$Q_pval<-as.double(all_res$Q_pval)
+all_res$Q<-as.double(all_res$Q)
+all_res$Q_df<-as.double(all_res$Q_df)
+all_res$intercept_pval<-as.double(all_res$intercept_pval)
+all_res$intercept<-as.double(all_res$intercept)
+all_res$intercept_se<-as.double(all_res$intercept_se)
+
+all_res$BETA<-paste(round(all_res$b,3)," (",round(all_res$b-1.96*all_res$se,3),"-",round(all_res$b+1.96*all_res$se,3),")",sep = "")
+all_res$OR<-paste(round(exp(all_res$b),3)," (",round(exp(all_res$b-1.96*all_res$se),3),"-",round(exp(all_res$b+1.96*all_res$se),3),")",sep = "")
+
+write.csv(all_res,file = file.path("BMI_BrainGene_mr_bindres.csv"))
+write.xlsx(all_res,file = file.path("BMI_BrainGene_mr_bindres.xlsx"))
+```
+
+## `BMI_BrainPro_MR.Rmd`
+
+```{r "BMI_BrainPro_MR.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: BMI_BrainPro_MR.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(dplyr)
+library(data.table)
+library(readxl)
+library(openxlsx)
+library(TwoSampleMR)
+library(plinkbinr)
+library(ieugwasr)
+library(ggplot2)
+library(mr.raps)
+
+# ---------------------------------------------------------------------------
+# Chunk: setting
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+setwd("Path/BMIQTLSMR/")
+
+target<-c("ENSG00000099968.BCL2L13","ENSG00000119922.IFIT2","ENSG00000106460.TMEM106B")
+target_name<-c("BCL2L13","IFIT2","TMEM106B")
+
+exposure<-read.table("Path/datasource/GWAS_data/BMI_allSNP_hg19.txt",header = T,sep = "\t")
+exposure<-subset(exposure,exposure$P<5e-8)
+
+row_file<-data.frame(exposure=NA,nsnp=NA,gene=NA,merge=NA,format_row=NA,clump_row=NA,harmonise_row=NA)
+
+# ---------------------------------------------------------------------------
+# Chunk: harmonise
+# ---------------------------------------------------------------------------
+setwd("Path/BMIQTLSMR/")
+r<-0
+for (i in 1:length(target)) {
+  
+  gene<-read.table(paste("Path/datasource/pQTL_data/ROSMAP/SleepApnea/",target[i],".txt",sep = ""),header = T,sep = "\t")
+
+  setnames(gene,c("Chr","Bp","A1","A2","se"),c("CHR","BP","Effect_Allele","Other_Allele","SE"))
+
+  
+  r<-r+1
+  row_file[r,] <- NA
+  row_file[["gene"]][r] <- as.character(target_name[i])
+  row_file[["nsnp"]][r] <- nrow(gene)
+  row_file[["exposure"]][r] <- "BMI"
+  
+  #merge
+  merge1<-merge(exposure,gene,by=c("CHR","BP","Effect_Allele","Other_Allele"),suffixes=c(".bmi",".ge"))
+  flip_pro <- rename(exposure,Effect_Allele=Other_Allele,Other_Allele=Effect_Allele)
+  flip_pro$BETA = 0-exposure$BETA
+  merge2 <- merge(flip_pro,gene,by=c("CHR","BP","Effect_Allele","Other_Allele"),suffixes=c(".bmi",".ge"))
+  input <- rbind(merge1,merge2)
+  row_file[["merge"]][r] <- nrow(input)
+  if(nrow(input)==0){
+    next
+  }
+  
+  #format
+  exposure_format<-format_data(input,
+                          type = "exposure",header = TRUE,snps = NULL,
+                          snp_col = "SNP.bmi",chr_col = "CHR",
+                          pos_col = "BP",
+                          effect_allele_col = "Effect_Allele",
+                          other_allele_col = "Other_Allele",
+                          beta_col = "BETA",
+                          se_col = "BETA_SE",eaf_col = "FREQ",
+                          pval_col = "P",samplesize_col = "N")
+  exposure_format$exposure<-"BMI"
+  row_file[["format_row"]][r]<-nrow(exposure_format)
+  
+  #clump
+  clump_temp<-exposure_format[,c("SNP","pval.exposure")]
+  pre_clump_data <- clump_temp %>% select(rsid = SNP,pval = pval.exposure)
+  pro_SleepApnea_clump <- tryCatch({
+    ld_clump_local(pre_clump_data,
+                  clump_kb = 10000,  
+                  clump_r2 = 0.001,  
+                  clump_p = 5*10^(-8),  
+                  plink_bin = get_plink_exe(),  
+                  bfile = "Path/g1000/EUR") %>% {.$rsid}
+    }, error=function(e) {})
+  row_file[["clump_row"]][r]<-length(pro_SleepApnea_clump)
+  clump <- subset(exposure_format, SNP %in% pro_SleepApnea_clump)
+  
+  #outcome/harmonise
+  out<-tryCatch({
+    format_data(input,type = "outcome",header = TRUE,
+                      snps = clump$SNP,snp_col = "SNP.ge",chr_col = "CHR",
+                          pos_col = "BP",
+                          effect_allele_col = "Effect_Allele",
+                          other_allele_col = "Other_Allele",
+                          beta_col = "Beta",
+                          se_col = "SE",eaf_col = "Freq",
+                          pval_col = "p")
+  },error=function(e) {})
+  if(length(out)!=0)
+    out$outcome<-as.character(target_name[i])
+  
+  if(length(out)==0){
+    row_file[["harmonise_row"]][r]<-0
+  }else{
+    exp_out_har<-harmonise_data(clump,out,action = 1) 
+    row_file[["harmonise_row"]][r]<-nrow(exp_out_har)
+    save(exp_out_har,file = 
+         file.path(paste("Path/BMIQTLSMR/harmonise_data/BMI_BrainPro_",
+                         as.character(target_name[i]),"_har.RData",
+                         sep = "")))
+    write.csv(exp_out_har,file = 
+         file.path(paste("Path/BMIQTLSMR/harmonise_data/BMI_BrainPro_",
+                         as.character(target_name[i]),"_har.csv",sep = "")))
+  }
+}
+
+#save file
+write.xlsx(row_file,"BMI_BrainPro_row.xlsx")
+rm(list = ls())
+
+# ---------------------------------------------------------------------------
+# Chunk: MR
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+setwd("Path/BMIQTLSMR/")
+
+combine_all_mrresults <- function (res, het, plt, sin, ao_slc = T, Exp = F, split.exposure = F, split.outcome = F) 
+{
+    requireNamespace("plyr", quietly = TRUE)
+    het <- het[, c("id.exposure", "id.outcome", "method", "Q", 
+        "Q_df", "Q_pval")]
+       sin <- sin[grep("[:0-9:]", sin$SNP), ]
+    sin$method <- "Wald ratio"
+    names(sin)[names(sin) == "p"] <- "pval"
+    names(res)[names(res) == "method"] <- "Method"
+    names(het)[names(het) == "method"] <- "Method"
+    names(sin)[names(sin) == "method"] <- "Method"
+    res <- merge(res, het, by = c("id.outcome", "id.exposure", 
+        "Method"), all.x = T)
+    res <- plyr::rbind.fill(res, sin[, c("exposure", "outcome", 
+        "id.exposure", "id.outcome", "SNP", "b", "se", "pval", 
+        "Method")])
+    if (ao_slc) {
+        ao <- available_outcomes()
+        names(ao)[names(ao) == "nsnp"] <- "nsnps.outcome.array"
+        res <- merge(res, ao[, !names(ao) %in% c("unit", "priority", 
+            "sd", "path", "note", "filename", "access", "mr")], 
+            by.x = "id.outcome", by.y = "id")
+    }
+    res$nsnp[is.na(res$nsnp)] <- 1
+    for (i in unique(res$id.outcome)) {
+        Methods <- unique(res$Method[res$id.outcome == i])
+        Methods <- Methods[Methods != "Wald ratio"]
+        for (j in unique(Methods)) {
+            res$SNP[res$id.outcome == i & res$Method == j] <- 
+              paste(res$SNP[res$id.outcome == 
+                i & res$Method == "Wald ratio"], collapse = "; ")
+        }
+    }
+    if (Exp) {
+        res$or <- exp(res$b)
+        res$or_lci95 <- exp(res$b - res$se * 1.96)
+        res$or_uci95 <- exp(res$b + res$se * 1.96)
+    }
+    plt <- plt[, c("id.outcome", "id.exposure", "egger_intercept", 
+        "se", "pval")]
+    plt$Method <- "MR Egger"
+    names(plt)[names(plt) == "egger_intercept"] <- "intercept"
+    names(plt)[names(plt) == "se"] <- "intercept_se"
+    names(plt)[names(plt) == "pval"] <- "intercept_pval"
+    res <- merge(res, plt, by = c("id.outcome", "id.exposure", 
+        "Method"), all.x = T)
+    if (split.exposure) {
+        res <- split_exposure(res)
+    }
+    if (split.outcome) {
+        res <- split_outcome(res)
+    }
+    Cols <- c("Method", "outcome", "exposure", "nsnp", "b", "se", 
+        "pval", "intercept", "intercept_se", "intercept_pval", 
+        "Q", "Q_df", "Q_pval", "consortium", "ncase", "ncontrol", 
+        "pmid", "population")
+    res <- res[, c(names(res)[names(res) %in% Cols], names(res)[which(!names(res) %in% 
+        Cols)])]
+    return(res)
+}
+
+all_res<-data.frame(Method=NA,outcome=NA,exposure=NA,nsnp=NA,b=NA,se=NA,pval=NA,Q=NA,Q_df=NA,Q_pval=NA,intercept=NA,intercept_se=NA,intercept_pval=NA,id.outcome=NA,id.exposure=NA,exp_out_har_pair=NA)
+
+target_name<-c("BCL2L13","IFIT2","TMEM106B")
+
+for (i in 1:length(target_name)) {
+
+  if(file.exists(paste("harmonise_data/BMI_BrainPro_",
+                       target_name[i],"_har.RData",sep = ""))){
+    folder_path<-paste("mr_res/BMI_BrainPro_",target_name[i],"/",sep = "")
+    dir.create(folder_path)
+
+    load(paste("harmonise_data/BMI_BrainPro_",target_name[i],"_har.RData",sep = ""))
+    
+    if(nrow(subset(exp_out_har,mr_keep==TRUE))!=0){
+      exp_out_har_mr_bindres<-data.frame(Method=NA,outcome=NA,exposure=NA,nsnp=NA,            b=NA,se=NA,pval=NA,Q=NA,Q_df=NA,Q_pval=NA,intercept=NA,intercept_se=NA,                   intercept_pval=NA,id.outcome=NA,id.exposure=NA,exp_out_har_pair=NA)
+      
+      if(nrow(subset(exp_out_har,mr_keep==TRUE))>2){
+        exp_out_har_mrdeft<-mr(exp_out_har,method_list=                               
+                              c("mr_ivw","mr_egger_regression","mr_weighted_median"))
+        exp_out_har_mrhet<-mr_heterogeneity(exp_out_har)
+        exp_out_har_mrplt<-mr_pleiotropy_test(exp_out_har)
+        exp_out_har_mrsin<-mr_singlesnp(exp_out_har)
+        exp_out_har_mrloo<-mr_leaveoneout(exp_out_har)
+
+       #plots
+       exp_out_har_scatP<-mr_scatter_plot(exp_out_har_mrdeft,exp_out_har)
+       exp_out_har_scatP
+       ggsave(exp_out_har_scatP[[1]], 
+           file=file.path(paste("mr_res/BMI_BrainPro_",target_name[i],
+                                "/BMI_BrainPro_",target_name[i],
+                                "_har_scatP.pdf",sep = "")))
+
+       exp_out_har_sinP<-mr_forest_plot(exp_out_har_mrsin)
+       exp_out_har_sinP
+       ggsave(exp_out_har_sinP[[1]], 
+           file=file.path(paste("mr_res/BMI_BrainPro_",target_name[i],
+                                "/BMI_BrainPro_",target_name[i],
+                                "_har_sinP.pdf",sep = "")))
+
+       exp_out_har_looP<-mr_leaveoneout_plot(exp_out_har_mrloo)
+       exp_out_har_looP
+       ggsave(exp_out_har_looP[[1]], 
+           file=file.path(paste("mr_res/BMI_BrainPro_",target_name[i],
+                                "/BMI_BrainPro_",target_name[i],
+                                "_har_looP.pdf",sep = "")))
+
+       exp_out_har_funnelP<-mr_funnel_plot(exp_out_har_mrsin)
+       exp_out_har_funnelP
+       ggsave(exp_out_har_funnelP[[1]], 
+           file=file.path(paste("mr_res/BMI_BrainPro_",target_name[i],
+                                "/BMI_BrainPro_",target_name[i],
+                                "_har_funnelP.pdf",sep = "")))
+
+       #combine_all_mrresults 
+       exp_out_har_mrallres<-combine_all_mrresults(res = exp_out_har_mrdeft, 
+                                           het= exp_out_har_mrhet,
+                                           plt =exp_out_har_mrplt,
+                                           sin = exp_out_har_mrsin, 
+                                           ao_slc = FALSE)
+       write.csv(exp_out_har_mrallres,file = 
+                file.path(paste("mr_res/BMI_BrainPro_",target_name[i],
+                                "/BMI_BrainPro_",target_name[i],
+                                "_har_mr_allres.csv",sep = "")))
+
+       ##subset for rbind
+       exp_out_har_mrsubres<-exp_out_har_mrallres[-which(exp_out_har_mrallres$Method==
+                                                          "Wald ratio"),]
+       exp_out_har_mrsubres<-exp_out_har_mrsubres[,c("Method","outcome","exposure","nsnp","b","se","pval","Q","Q_df","Q_pval","intercept","intercept_se","intercept_pval","id.outcome","id.exposure")]
+       write.csv(exp_out_har_mrsubres,file = 
+                file.path(paste("mr_res/BMI_BrainPro_",target_name[i],
+                                "/BMI_BrainPro_",target_name[i],
+                                "_har_mr_subres.csv",sep = "")))
+
+       #add mr.raps for weak instrumental
+       exp_out_har_mrraps<-mr.raps(b_exp = exp_out_har$beta.exposure,
+                                 b_out = exp_out_har$beta.outcome,
+                                 se_exp = exp_out_har$se.exposure,
+                                 se_out = exp_out_har$se.outcome)
+       write.csv(exp_out_har_mrraps,file= 
+                file.path(paste("mr_res/BMI_BrainPro_",target_name[i],
+                                "/BMI_BrainPro_",target_name[i],
+                                "_har_mr_rapsres.csv",sep = "")))
+
+       ##transform list to data.frame
+       exp_out_har_mrraps_re<-as.data.frame(exp_out_har_mrraps)
+
+       ##rename colnames to merge
+       setnames(exp_out_har_mrraps_re,c("beta.hat","beta.se","beta.p.value"),
+             c("b","se","pval"))
+       exp_out_har_mrraps_re$Method<-"MR RAPS"
+       exp_out_har_mrraps_re$outcome<-as.character(target_name[i])
+       exp_out_har_mrraps_re$exposure<-"BMI"
+       exp_out_har_mrraps_re$nsnp<-exp_out_har_mrdeft[1,"nsnp"]
+       exp_out_har_mrraps_re$Q<-"NA"
+       exp_out_har_mrraps_re$Q_df<-"NA"
+       exp_out_har_mrraps_re$Q_pval<-"NA"
+       exp_out_har_mrraps_re$intercept<-"NA"
+       exp_out_har_mrraps_re$intercept_se<-"NA"
+       exp_out_har_mrraps_re$intercept_pval<-"NA"
+       exp_out_har_mrraps_re$id.outcome<-"NA"
+       exp_out_har_mrraps_re$id.exposure<-"NA"
+       exp_out_har_mrraps_re<-exp_out_har_mrraps_re[,c("Method","outcome","exposure",                       "nsnp","b","se","pval","Q","Q_df","Q_pval","intercept",
+                                                       "intercept_se","intercept_pval",
+                                                       "id.outcome","id.exposure")]
+
+       #rbind mr results
+       exp_out_har_mr_bindres<-rbind(exp_out_har_mrsubres,exp_out_har_mrraps_re)
+       exp_out_har_mr_bindres$exp_out_har_pair=as.character(paste("BMI_BrainPro",target_name[i],"har",sep = "_"))
+       write.csv(exp_out_har_mr_bindres,file = 
+                file.path(paste("mr_res/BMI_BrainPro_",target_name[i],
+                                "/BMI_BrainPro_",target_name[i],
+                                "_har_mr_bindres.csv",sep = "")))
+      }else{
+       exp_out_har_mrdeft<-mr(exp_out_har)
+       exp_out_har_mr_bindres[1,"Method"]<-exp_out_har_mrdeft[1,"method"]
+       exp_out_har_mr_bindres[1,"outcome"]<-exp_out_har_mrdeft[1,"outcome"]
+       exp_out_har_mr_bindres[1,"exposure"]<-exp_out_har_mrdeft[1,"exposure"]
+       exp_out_har_mr_bindres[1,"nsnp"]<-exp_out_har_mrdeft[1,"nsnp"]
+       exp_out_har_mr_bindres[1,"b"]<-exp_out_har_mrdeft[1,"b"]
+       exp_out_har_mr_bindres[1,"se"]<-exp_out_har_mrdeft[1,"se"]
+       exp_out_har_mr_bindres[1,"pval"]<-exp_out_har_mrdeft[1,"pval"]
+       exp_out_har_mr_bindres[1,"id.outcome"]<-exp_out_har_mrdeft[1,"id.outcome"]
+       exp_out_har_mr_bindres[1,"id.exposure"]<-exp_out_har_mrdeft[1,"id.exposure"]
+       exp_out_har_mr_bindres[1,"exp_out_har_pair"]=as.character(
+        paste("BMI_BrainPro",target_name[i],"har",sep = "_"))
+       
+       #add mr.raps for weak instrumental
+       exp_out_har_mrraps<-mr.raps(b_exp = exp_out_har$beta.exposure,
+                                 b_out = exp_out_har$beta.outcome,
+                                 se_exp = exp_out_har$se.exposure,
+                                 se_out = exp_out_har$se.outcome)
+       write.csv(exp_out_har_mrraps,file= 
+                file.path(paste("mr_res/BMI_BrainPro_",target_name[i],
+                                "/BMI_BrainPro_",target_name[i],
+                                "_har_mr_rapsres.csv",sep = "")))
+
+       ##transform list to data.frame
+       exp_out_har_mrraps_re<-as.data.frame(exp_out_har_mrraps)
+
+       ##rename colnames to merge
+       setnames(exp_out_har_mrraps_re,c("beta.hat","beta.se","beta.p.value"),
+             c("b","se","pval"))
+       exp_out_har_mrraps_re$Method<-"MR RAPS"
+       exp_out_har_mrraps_re$outcome<-as.character(target_name[i])
+       exp_out_har_mrraps_re$exposure<-"BMI"
+       exp_out_har_mrraps_re$nsnp<-exp_out_har_mrdeft[1,"nsnp"]
+       exp_out_har_mrraps_re$Q<-"NA"
+       exp_out_har_mrraps_re$Q_df<-"NA"
+       exp_out_har_mrraps_re$Q_pval<-"NA"
+       exp_out_har_mrraps_re$intercept<-"NA"
+       exp_out_har_mrraps_re$intercept_se<-"NA"
+       exp_out_har_mrraps_re$intercept_pval<-"NA"
+       exp_out_har_mrraps_re$id.outcome<-exp_out_har_mrdeft[1,"id.outcome"]
+       exp_out_har_mrraps_re$id.exposure<-exp_out_har_mrdeft[1,"id.exposure"]
+       exp_out_har_mrraps_re$exp_out_har_pair=as.character(
+        paste("BMI_BrainPro",target_name[i],"har",sep = "_"))
+       exp_out_har_mrraps_re<-exp_out_har_mrraps_re[,c("Method","outcome","exposure",                       "nsnp","b","se","pval","Q","Q_df","Q_pval","intercept",
+      "intercept_se","intercept_pval","id.outcome","id.exposure","exp_out_har_pair")]
+
+       #rbind mr results
+       exp_out_har_mr_bindres<-rbind(exp_out_har_mr_bindres,exp_out_har_mrraps_re)
+       
+       write.csv(exp_out_har_mr_bindres,file = 
+                file.path(paste("mr_res/BMI_BrainPro_",target_name[i],
+                                "/BMI_BrainPro_",target_name[i],
+                                "_har_mr_bindres.csv",sep = "")))
+      }
+      all_res<-rbind(all_res,exp_out_har_mr_bindres)
+      
+    }else{
+      exp_out_har_mr_bindres<-data.frame(Method=NA,outcome=NA,exposure=NA,nsnp=NA,            b=NA,se=NA,pval=NA,Q=NA,Q_df=NA,Q_pval=NA,intercept=NA,intercept_se=NA,                   intercept_pval=NA,id.outcome=NA,id.exposure=NA,exp_out_har_pair=NA)
+      exp_out_har_mr_bindres[1,"Method"]<-"None"
+      exp_out_har_mr_bindres[1,"outcome"]<-target_name[i]
+      exp_out_har_mr_bindres[1,"exposure"]<-"BMI"
+      exp_out_har_mr_bindres[1,"nsnp"]<-nrow(exp_out_har)
+      all_res<-rbind(all_res,exp_out_har_mr_bindres)
+    }
+  }
+}
+
+#save all_res
+all_res<-all_res[-1,]
+all_res$Q_pval<-as.double(all_res$Q_pval)
+all_res$Q<-as.double(all_res$Q)
+all_res$Q_df<-as.double(all_res$Q_df)
+all_res$intercept_pval<-as.double(all_res$intercept_pval)
+all_res$intercept<-as.double(all_res$intercept)
+all_res$intercept_se<-as.double(all_res$intercept_se)
+
+all_res$BETA<-paste(round(all_res$b,3)," (",round(all_res$b-1.96*all_res$se,3),"-",round(all_res$b+1.96*all_res$se,3),")",sep = "")
+all_res$OR<-paste(round(exp(all_res$b),3)," (",round(exp(all_res$b-1.96*all_res$se),3),"-",round(exp(all_res$b+1.96*all_res$se),3),")",sep = "")
+
+write.csv(all_res,file = file.path("BMI_BrainPro_mr_bindres.csv"))
+write.xlsx(all_res,file = file.path("BMI_BrainPro_mr_bindres.xlsx"))
+```
+
+## `BMI_OSA_MR.Rmd`
+
+```{r "BMI_OSA_MR.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: BMI_OSA_MR.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(dplyr)
+library(data.table)
+library(readxl)
+library(openxlsx)
+library(TwoSampleMR)
+library(plinkbinr)
+library(ieugwasr)
+library(ggplot2)
+library(mr.raps)
+
+# ---------------------------------------------------------------------------
+# Chunk: setting
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+setwd("Path/BMISMR/")
+
+load("Path/datasource/GWAS_data/sleepapnoea_FINNGEN_R12_allSNP_hg19.RData")
+
+dat_allSNP_hg19<- subset(dat_allSNP_hg19, dat_allSNP_hg19$FREQ<1)
+dat_allSNP_hg19<- dat_allSNP_hg19[order(dat_allSNP_hg19$P,decreasing = FALSE),]
+dat_allSNP_hg19<- dat_allSNP_hg19[!duplicated(dat_allSNP_hg19$SNP),]
+
+row_file<-data.frame(exposure=NA,nsnp=NA,sleep=NA,merge=NA,format_row=NA,clump_row=NA,harmonise_row=NA)
+
+# ---------------------------------------------------------------------------
+# Chunk: harmonise
+# ---------------------------------------------------------------------------
+setwd("Path/BMISMR/")
+
+exposure<-read.table("Path/datasource/GWAS_data/BMI_allSNP_hg19.txt",header = T,sep = "\t")
+
+exposure<-subset(exposure,exposure$P<5e-8)
+if(nrow(exposure)==0)
+  next
+  
+r<-1
+row_file[r,] <- NA
+row_file[["exposure"]][r] <- "BMI"
+row_file[["nsnp"]][r] <- nrow(exposure)
+row_file[["sleep"]][r] <- "SleepApnea"
+  
+  #format
+  exposure_format<-format_data(exposure,
+                          type = "exposure",header = TRUE,snps = NULL,
+                          snp_col = "SNP",chr_col = "CHR",
+                          pos_col = "BP",
+                          effect_allele_col = "Effect_Allele",
+                          other_allele_col = "Other_Allele",
+                          beta_col = "BETA",
+                          se_col = "BETA_SE",eaf_col = "FREQ",
+                          pval_col = "P",samplesize_col = "N")
+  exposure_format$exposure<-"BMI"
+  row_file[["format_row"]][r]<-nrow(exposure_format)
+  
+  #clump
+  clump_temp<-exposure_format[,c("SNP","pval.exposure")]
+  pre_clump_data <- clump_temp %>% select(rsid = SNP,pval = pval.exposure)
+  pro_SleepApnea_clump <- tryCatch({
+    ld_clump_local(pre_clump_data,
+                  clump_kb = 10000,  
+                  clump_r2 = 0.001,  
+                  clump_p = 5*10^(-8),  
+                  plink_bin = get_plink_exe(),  
+                  bfile = "Path/g1000/EUR") %>% {.$rsid}
+    }, error=function(e) {})
+  row_file[["clump_row"]][r]<-length(pro_SleepApnea_clump)
+  clump <- subset(exposure_format, SNP %in% pro_SleepApnea_clump)
+  
+  #outcome/harmonise
+  out<-tryCatch({
+    format_data(dat_allSNP_hg19,type = "outcome",header = TRUE,
+                      snps = clump$SNP,snp_col = "SNP",
+                      pos_col = "BP",chr_col = "CHR",
+                      effect_allele_col = "Effect_Allele",
+                      other_allele_col = "Other_Allele",beta_col = "BETA",
+                      se_col = "BETA_SE",pval_col = "P",eaf_col = "FREQ")
+  },error=function(e) {})
+  if(length(out)!=0)
+    out$outcome<-"SleepApnea"
+  
+  if(length(out)==0){
+    row_file[["harmonise_row"]][r]<-0
+  }else{
+    exp_out_har<-harmonise_data(clump,out,action = 2) 
+    row_file[["harmonise_row"]][r]<-nrow(exp_out_har)
+    save(exp_out_har,file = 
+         file.path("Path/BMISMR/harmonise_data/BMI_SleepApnea_har.RData"))
+    write.csv(exp_out_har,file = 
+         file.path("Path/BMISMR/harmonise_data/BMI_SleepApnea_har.csv"))
+  }
+
+#save file
+write.xlsx(row_file,"BMI_SleepApnea_row.xlsx")
+rm(list = ls())
+
+# ---------------------------------------------------------------------------
+# Chunk: MR
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+setwd("Path/BMISMR/")
+
+combine_all_mrresults <- function (res, het, plt, sin, ao_slc = T, Exp = F, split.exposure = F, split.outcome = F) 
+{
+    requireNamespace("plyr", quietly = TRUE)
+    het <- het[, c("id.exposure", "id.outcome", "method", "Q", 
+        "Q_df", "Q_pval")]
+       sin <- sin[grep("[:0-9:]", sin$SNP), ]
+    sin$method <- "Wald ratio"
+    names(sin)[names(sin) == "p"] <- "pval"
+    names(res)[names(res) == "method"] <- "Method"
+    names(het)[names(het) == "method"] <- "Method"
+    names(sin)[names(sin) == "method"] <- "Method"
+    res <- merge(res, het, by = c("id.outcome", "id.exposure", 
+        "Method"), all.x = T)
+    res <- plyr::rbind.fill(res, sin[, c("exposure", "outcome", 
+        "id.exposure", "id.outcome", "SNP", "b", "se", "pval", 
+        "Method")])
+    if (ao_slc) {
+        ao <- available_outcomes()
+        names(ao)[names(ao) == "nsnp"] <- "nsnps.outcome.array"
+        res <- merge(res, ao[, !names(ao) %in% c("unit", "priority", 
+            "sd", "path", "note", "filename", "access", "mr")], 
+            by.x = "id.outcome", by.y = "id")
+    }
+    res$nsnp[is.na(res$nsnp)] <- 1
+    for (i in unique(res$id.outcome)) {
+        Methods <- unique(res$Method[res$id.outcome == i])
+        Methods <- Methods[Methods != "Wald ratio"]
+        for (j in unique(Methods)) {
+            res$SNP[res$id.outcome == i & res$Method == j] <- 
+              paste(res$SNP[res$id.outcome == 
+                i & res$Method == "Wald ratio"], collapse = "; ")
+        }
+    }
+    if (Exp) {
+        res$or <- exp(res$b)
+        res$or_lci95 <- exp(res$b - res$se * 1.96)
+        res$or_uci95 <- exp(res$b + res$se * 1.96)
+    }
+    plt <- plt[, c("id.outcome", "id.exposure", "egger_intercept", 
+        "se", "pval")]
+    plt$Method <- "MR Egger"
+    names(plt)[names(plt) == "egger_intercept"] <- "intercept"
+    names(plt)[names(plt) == "se"] <- "intercept_se"
+    names(plt)[names(plt) == "pval"] <- "intercept_pval"
+    res <- merge(res, plt, by = c("id.outcome", "id.exposure", 
+        "Method"), all.x = T)
+    if (split.exposure) {
+        res <- split_exposure(res)
+    }
+    if (split.outcome) {
+        res <- split_outcome(res)
+    }
+    Cols <- c("Method", "outcome", "exposure", "nsnp", "b", "se", 
+        "pval", "intercept", "intercept_se", "intercept_pval", 
+        "Q", "Q_df", "Q_pval", "consortium", "ncase", "ncontrol", 
+        "pmid", "population")
+    res <- res[, c(names(res)[names(res) %in% Cols], names(res)[which(!names(res) %in% 
+        Cols)])]
+    return(res)
+}
+
+all_res<-data.frame(Method=NA,outcome=NA,exposure=NA,nsnp=NA,b=NA,se=NA,pval=NA,Q=NA,Q_df=NA,Q_pval=NA,intercept=NA,intercept_se=NA,intercept_pval=NA,id.outcome=NA,id.exposure=NA,exp_out_har_pair=NA)
+
+    load("harmonise_data/BMI_SleepApnea_har.RData")
+    
+    if(nrow(subset(exp_out_har,mr_keep==TRUE))!=0){
+      exp_out_har_mr_bindres<-data.frame(Method=NA,outcome=NA,exposure=NA,nsnp=NA,            b=NA,se=NA,pval=NA,Q=NA,Q_df=NA,Q_pval=NA,intercept=NA,intercept_se=NA,                   intercept_pval=NA,id.outcome=NA,id.exposure=NA,exp_out_har_pair=NA)
+      
+      if(nrow(subset(exp_out_har,mr_keep==TRUE))>2){
+        exp_out_har_mrdeft<-mr(exp_out_har,method_list=                               
+                              c("mr_ivw","mr_egger_regression","mr_weighted_median"))
+        exp_out_har_mrhet<-mr_heterogeneity(exp_out_har)
+        exp_out_har_mrplt<-mr_pleiotropy_test(exp_out_har)
+        exp_out_har_mrsin<-mr_singlesnp(exp_out_har)
+        exp_out_har_mrloo<-mr_leaveoneout(exp_out_har)
+
+       #plots
+       exp_out_har_scatP<-mr_scatter_plot(exp_out_har_mrdeft,exp_out_har)
+       exp_out_har_scatP
+       ggsave(exp_out_har_scatP[[1]], 
+           file=file.path("mr_res/BMI_SleepApnea_har_scatP.pdf"))
+
+       exp_out_har_sinP<-mr_forest_plot(exp_out_har_mrsin)
+       exp_out_har_sinP
+       ggsave(exp_out_har_sinP[[1]], 
+           file=file.path("mr_res/BMI_SleepApnea_har_sinP.pdf"))
+
+       exp_out_har_looP<-mr_leaveoneout_plot(exp_out_har_mrloo)
+       exp_out_har_looP
+       ggsave(exp_out_har_looP[[1]], 
+           file=file.path("mr_res/BMI_SleepApnea_har_looP.pdf"))
+
+       exp_out_har_funnelP<-mr_funnel_plot(exp_out_har_mrsin)
+       exp_out_har_funnelP
+       ggsave(exp_out_har_funnelP[[1]], 
+           file=file.path("mr_res/BMI_SleepApnea_har_funnelP.pdf"))
+
+       #combine_all_mrresults 
+       exp_out_har_mrallres<-combine_all_mrresults(res = exp_out_har_mrdeft, 
+                                           het= exp_out_har_mrhet,
+                                           plt =exp_out_har_mrplt,
+                                           sin = exp_out_har_mrsin, 
+                                           ao_slc = FALSE)
+       write.csv(exp_out_har_mrallres,file = 
+                file.path("mr_res/BMI_SleepApnea_har_mr_allres.csv"))
+
+       ##subset for rbind
+       exp_out_har_mrsubres<-exp_out_har_mrallres[-which(exp_out_har_mrallres$Method==
+                                                          "Wald ratio"),]
+       exp_out_har_mrsubres<-exp_out_har_mrsubres[,c("Method","outcome","exposure","nsnp","b","se","pval","Q","Q_df","Q_pval","intercept","intercept_se","intercept_pval","id.outcome","id.exposure")]
+       write.csv(exp_out_har_mrsubres,file = 
+                file.path("mr_res/BMI_SleepApnea_har_mr_subres.csv"))
+
+       #add mr.raps for weak instrumental
+       exp_out_har_mrraps<-mr.raps(b_exp = exp_out_har$beta.exposure,
+                                 b_out = exp_out_har$beta.outcome,
+                                 se_exp = exp_out_har$se.exposure,
+                                 se_out = exp_out_har$se.outcome)
+       write.csv(exp_out_har_mrraps,file= 
+                file.path("mr_res/BMI_SleepApnea_har_mr_rapsres.csv"))
+
+       ##transform list to data.frame
+       exp_out_har_mrraps_re<-as.data.frame(exp_out_har_mrraps)
+
+       ##rename colnames to merge
+       setnames(exp_out_har_mrraps_re,c("beta.hat","beta.se","beta.p.value"),
+             c("b","se","pval"))
+       exp_out_har_mrraps_re$Method<-"MR RAPS"
+       exp_out_har_mrraps_re$outcome<-"SleepApnea"
+       exp_out_har_mrraps_re$exposure<-"BMI"
+       exp_out_har_mrraps_re$nsnp<-exp_out_har_mrdeft[1,"nsnp"]
+       exp_out_har_mrraps_re$Q<-"NA"
+       exp_out_har_mrraps_re$Q_df<-"NA"
+       exp_out_har_mrraps_re$Q_pval<-"NA"
+       exp_out_har_mrraps_re$intercept<-"NA"
+       exp_out_har_mrraps_re$intercept_se<-"NA"
+       exp_out_har_mrraps_re$intercept_pval<-"NA"
+       exp_out_har_mrraps_re$id.outcome<-"NA"
+       exp_out_har_mrraps_re$id.exposure<-"NA"
+       exp_out_har_mrraps_re<-exp_out_har_mrraps_re[,c("Method","outcome","exposure",                       "nsnp","b","se","pval","Q","Q_df","Q_pval","intercept",
+                                                       "intercept_se","intercept_pval",
+                                                       "id.outcome","id.exposure")]
+
+       #rbind mr results
+       exp_out_har_mr_bindres<-rbind(exp_out_har_mrsubres,exp_out_har_mrraps_re)
+       exp_out_har_mr_bindres$exp_out_har_pair="BMI_SleepApnea_har"
+       write.csv(exp_out_har_mr_bindres,file = 
+                file.path("mr_res/BMI_SleepApnea_har_mr_bindres.csv"))
+      }else{
+       exp_out_har_mrdeft<-mr(exp_out_har)
+       exp_out_har_mr_bindres[1,"Method"]<-exp_out_har_mrdeft[1,"method"]
+       exp_out_har_mr_bindres[1,"outcome"]<-exp_out_har_mrdeft[1,"outcome"]
+       exp_out_har_mr_bindres[1,"exposure"]<-exp_out_har_mrdeft[1,"exposure"]
+       exp_out_har_mr_bindres[1,"nsnp"]<-exp_out_har_mrdeft[1,"nsnp"]
+       exp_out_har_mr_bindres[1,"b"]<-exp_out_har_mrdeft[1,"b"]
+       exp_out_har_mr_bindres[1,"se"]<-exp_out_har_mrdeft[1,"se"]
+       exp_out_har_mr_bindres[1,"pval"]<-exp_out_har_mrdeft[1,"pval"]
+       exp_out_har_mr_bindres[1,"id.outcome"]<-exp_out_har_mrdeft[1,"id.outcome"]
+       exp_out_har_mr_bindres[1,"id.exposure"]<-exp_out_har_mrdeft[1,"id.exposure"]
+       exp_out_har_mr_bindres[1,"exp_out_har_pair"]="BMI_SleepApnea_har"
+       
+       #add mr.raps for weak instrumental
+       exp_out_har_mrraps<-mr.raps(b_exp = exp_out_har$beta.exposure,
+                                 b_out = exp_out_har$beta.outcome,
+                                 se_exp = exp_out_har$se.exposure,
+                                 se_out = exp_out_har$se.outcome)
+       write.csv(exp_out_har_mrraps,file= 
+                file.path("mr_res/BMI_SleepApnea_har_mr_rapsres.csv"))
+
+       ##transform list to data.frame
+       exp_out_har_mrraps_re<-as.data.frame(exp_out_har_mrraps)
+
+       ##rename colnames to merge
+       setnames(exp_out_har_mrraps_re,c("beta.hat","beta.se","beta.p.value"),
+             c("b","se","pval"))
+       exp_out_har_mrraps_re$Method<-"MR RAPS"
+       exp_out_har_mrraps_re$outcome<-"SleepApnea"
+       exp_out_har_mrraps_re$exposure<-"BMI"
+       exp_out_har_mrraps_re$nsnp<-exp_out_har_mrdeft[1,"nsnp"]
+       exp_out_har_mrraps_re$Q<-"NA"
+       exp_out_har_mrraps_re$Q_df<-"NA"
+       exp_out_har_mrraps_re$Q_pval<-"NA"
+       exp_out_har_mrraps_re$intercept<-"NA"
+       exp_out_har_mrraps_re$intercept_se<-"NA"
+       exp_out_har_mrraps_re$intercept_pval<-"NA"
+       exp_out_har_mrraps_re$id.outcome<-exp_out_har_mrdeft[1,"id.outcome"]
+       exp_out_har_mrraps_re$id.exposure<-exp_out_har_mrdeft[1,"id.exposure"]
+       exp_out_har_mrraps_re$exp_out_har_pair=as.character(
+        paste(target_name[i],"SleepApnea","har",sep = "_"))
+       exp_out_har_mrraps_re<-exp_out_har_mrraps_re[,c("Method","outcome","exposure",                       "nsnp","b","se","pval","Q","Q_df","Q_pval","intercept",
+      "intercept_se","intercept_pval","id.outcome","id.exposure","exp_out_har_pair")]
+
+       #rbind mr results
+       exp_out_har_mr_bindres<-rbind(exp_out_har_mr_bindres,exp_out_har_mrraps_re)
+       
+       write.csv(exp_out_har_mr_bindres,file = 
+                file.path("mr_res/BMI_SleepApnea_har_mr_bindres.csv"))
+      }
+      all_res<-rbind(all_res,exp_out_har_mr_bindres)
+      
+    }else{
+      exp_out_har_mr_bindres<-data.frame(Method=NA,outcome=NA,exposure=NA,nsnp=NA,            b=NA,se=NA,pval=NA,Q=NA,Q_df=NA,Q_pval=NA,intercept=NA,intercept_se=NA,                   intercept_pval=NA,id.outcome=NA,id.exposure=NA,exp_out_har_pair=NA)
+      exp_out_har_mr_bindres[1,"Method"]<-"None"
+      exp_out_har_mr_bindres[1,"outcome"]<-"SleepApnea"
+      exp_out_har_mr_bindres[1,"exposure"]<-"BMI"
+      exp_out_har_mr_bindres[1,"nsnp"]<-nrow(exp_out_har)
+      all_res<-rbind(all_res,exp_out_har_mr_bindres)
+    }
+
+#save all_res
+all_res<-all_res[-1,]
+all_res$Q_pval<-as.double(all_res$Q_pval)
+all_res$Q<-as.double(all_res$Q)
+all_res$Q_df<-as.double(all_res$Q_df)
+all_res$intercept_pval<-as.double(all_res$intercept_pval)
+all_res$intercept<-as.double(all_res$intercept)
+all_res$intercept_se<-as.double(all_res$intercept_se)
+
+all_res$BETA<-paste(round(all_res$b,3)," (",round(all_res$b-1.96*all_res$se,3),"-",round(all_res$b+1.96*all_res$se,3),")",sep = "")
+all_res$OR<-paste(round(exp(all_res$b),3)," (",round(exp(all_res$b-1.96*all_res$se),3),"-",round(exp(all_res$b+1.96*all_res$se),3),")",sep = "")
+
+write.csv(all_res,file = file.path("BMI_SleepApnea_mr_bindres.csv"))
+write.xlsx(all_res,file = file.path("BMI_SleepApnea_mr_bindres.xlsx"))
+
+# ---------------------------------------------------------------------------
+# Chunk: RadialMR
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+setwd("Path/BMISMR/")
+
+combine_all_mrresults <- function (res, het, plt, sin, ao_slc = T, Exp = F, split.exposure = F, split.outcome = F) 
+{
+    requireNamespace("plyr", quietly = TRUE)
+    het <- het[, c("id.exposure", "id.outcome", "method", "Q", 
+        "Q_df", "Q_pval")]
+       sin <- sin[grep("[:0-9:]", sin$SNP), ]
+    sin$method <- "Wald ratio"
+    names(sin)[names(sin) == "p"] <- "pval"
+    names(res)[names(res) == "method"] <- "Method"
+    names(het)[names(het) == "method"] <- "Method"
+    names(sin)[names(sin) == "method"] <- "Method"
+    res <- merge(res, het, by = c("id.outcome", "id.exposure", 
+        "Method"), all.x = T)
+    res <- plyr::rbind.fill(res, sin[, c("exposure", "outcome", 
+        "id.exposure", "id.outcome", "SNP", "b", "se", "pval", 
+        "Method")])
+    if (ao_slc) {
+        ao <- available_outcomes()
+        names(ao)[names(ao) == "nsnp"] <- "nsnps.outcome.array"
+        res <- merge(res, ao[, !names(ao) %in% c("unit", "priority", 
+            "sd", "path", "note", "filename", "access", "mr")], 
+            by.x = "id.outcome", by.y = "id")
+    }
+    res$nsnp[is.na(res$nsnp)] <- 1
+    for (i in unique(res$id.outcome)) {
+        Methods <- unique(res$Method[res$id.outcome == i])
+        Methods <- Methods[Methods != "Wald ratio"]
+        for (j in unique(Methods)) {
+            res$SNP[res$id.outcome == i & res$Method == j] <- 
+              paste(res$SNP[res$id.outcome == 
+                i & res$Method == "Wald ratio"], collapse = "; ")
+        }
+    }
+    if (Exp) {
+        res$or <- exp(res$b)
+        res$or_lci95 <- exp(res$b - res$se * 1.96)
+        res$or_uci95 <- exp(res$b + res$se * 1.96)
+    }
+    plt <- plt[, c("id.outcome", "id.exposure", "egger_intercept", 
+        "se", "pval")]
+    plt$Method <- "MR Egger"
+    names(plt)[names(plt) == "egger_intercept"] <- "intercept"
+    names(plt)[names(plt) == "se"] <- "intercept_se"
+    names(plt)[names(plt) == "pval"] <- "intercept_pval"
+    res <- merge(res, plt, by = c("id.outcome", "id.exposure", 
+        "Method"), all.x = T)
+    if (split.exposure) {
+        res <- split_exposure(res)
+    }
+    if (split.outcome) {
+        res <- split_outcome(res)
+    }
+    Cols <- c("Method", "outcome", "exposure", "nsnp", "b", "se", 
+        "pval", "intercept", "intercept_se", "intercept_pval", 
+        "Q", "Q_df", "Q_pval", "consortium", "ncase", "ncontrol", 
+        "pmid", "population")
+    res <- res[, c(names(res)[names(res) %in% Cols], names(res)[which(!names(res) %in% 
+        Cols)])]
+    return(res)
+}
+
+all_res<-data.frame(Method=NA,outcome=NA,exposure=NA,nsnp=NA,b=NA,se=NA,pval=NA,Q=NA,Q_df=NA,Q_pval=NA,intercept=NA,intercept_se=NA,intercept_pval=NA,id.outcome=NA,id.exposure=NA,exp_out_har_pair=NA)
+
+    load("harmonise_data/BMI_SleepApnea_har.RData")
+    
+    #radial
+    ivw_radial <- RadialMR::ivw_radial(
+    r_input = exp_out_har,
+    alpha = 0.05,
+    weights = 1
+    )
+    egger_radial <- RadialMR::egger_radial(
+    r_input = exp_out_har,
+    alpha = 0.05,
+    weights = 1
+    )
+
+    if (
+    is.character(ivw_radial[["outliers"]]) &
+      is.data.frame(egger_radial[["outliers"]])
+    ) {
+    outliers <- c(egger_radial[["outliers"]][["SNP"]])
+    exp_out_har <- exp_out_har[which(!exp_out_har$SNP %in% outliers), ]
+    }
+
+    if (
+    is.data.frame(ivw_radial[["outliers"]]) &
+      is.character(egger_radial[["outliers"]])
+    ) {
+    outliers <- c(ivw_radial[["outliers"]][["SNP"]])
+    exp_out_har <- exp_out_har[which(!exp_out_har$SNP %in% outliers), ]
+    }
+
+    if (
+    is.data.frame(ivw_radial[["outliers"]]) &
+      is.data.frame(egger_radial[["outliers"]])
+    ) {
+    outliers <- c(
+      ivw_radial[["outliers"]][["SNP"]],
+      egger_radial[["outliers"]][["SNP"]]
+    )
+    outliers <- outliers[which(duplicated(outliers) == F)]
+    exp_out_har <- exp_out_har[which(!exp_out_har$SNP %in% outliers), ]
+    }
+    
+    if(nrow(subset(exp_out_har,mr_keep==TRUE))!=0){
+      exp_out_har_mr_bindres<-data.frame(Method=NA,outcome=NA,exposure=NA,nsnp=NA,            b=NA,se=NA,pval=NA,Q=NA,Q_df=NA,Q_pval=NA,intercept=NA,intercept_se=NA,                   intercept_pval=NA,id.outcome=NA,id.exposure=NA,exp_out_har_pair=NA)
+      
+      if(nrow(subset(exp_out_har,mr_keep==TRUE))>2){
+        exp_out_har_mrdeft<-mr(exp_out_har,method_list=                               
+                              c("mr_ivw","mr_egger_regression","mr_weighted_median"))
+        exp_out_har_mrhet<-mr_heterogeneity(exp_out_har)
+        exp_out_har_mrplt<-mr_pleiotropy_test(exp_out_har)
+        exp_out_har_mrsin<-mr_singlesnp(exp_out_har)
+        exp_out_har_mrloo<-mr_leaveoneout(exp_out_har)
+
+       #plots
+       exp_out_har_scatP<-mr_scatter_plot(exp_out_har_mrdeft,exp_out_har)
+       exp_out_har_scatP
+       ggsave(exp_out_har_scatP[[1]], 
+           file=file.path("mr_res/BMI_SleepApnea_har_Radial_scatP.pdf"))
+
+       exp_out_har_sinP<-mr_forest_plot(exp_out_har_mrsin)
+       exp_out_har_sinP
+       ggsave(exp_out_har_sinP[[1]], 
+           file=file.path("mr_res/BMI_SleepApnea_har_Radial_sinP.pdf"))
+
+       exp_out_har_looP<-mr_leaveoneout_plot(exp_out_har_mrloo)
+       exp_out_har_looP
+       ggsave(exp_out_har_looP[[1]], 
+           file=file.path("mr_res/BMI_SleepApnea_har_Radial_looP.pdf"))
+
+       exp_out_har_funnelP<-mr_funnel_plot(exp_out_har_mrsin)
+       exp_out_har_funnelP
+       ggsave(exp_out_har_funnelP[[1]], 
+           file=file.path("mr_res/BMI_SleepApnea_har_Radial_funnelP.pdf"))
+
+       #combine_all_mrresults 
+       exp_out_har_mrallres<-combine_all_mrresults(res = exp_out_har_mrdeft, 
+                                           het= exp_out_har_mrhet,
+                                           plt =exp_out_har_mrplt,
+                                           sin = exp_out_har_mrsin, 
+                                           ao_slc = FALSE)
+       write.csv(exp_out_har_mrallres,file = 
+                file.path("mr_res/BMI_SleepApnea_har_Radial_mr_allres.csv"))
+
+       ##subset for rbind
+       exp_out_har_mrsubres<-exp_out_har_mrallres[-which(exp_out_har_mrallres$Method==
+                                                          "Wald ratio"),]
+       exp_out_har_mrsubres<-exp_out_har_mrsubres[,c("Method","outcome","exposure","nsnp","b","se","pval","Q","Q_df","Q_pval","intercept","intercept_se","intercept_pval","id.outcome","id.exposure")]
+       write.csv(exp_out_har_mrsubres,file = 
+                file.path("mr_res/BMI_SleepApnea_har_Radial_mr_subres.csv"))
+
+       #add mr.raps for weak instrumental
+       exp_out_har_mrraps<-mr.raps(b_exp = exp_out_har$beta.exposure,
+                                 b_out = exp_out_har$beta.outcome,
+                                 se_exp = exp_out_har$se.exposure,
+                                 se_out = exp_out_har$se.outcome)
+       write.csv(exp_out_har_mrraps,file= 
+                file.path("mr_res/BMI_SleepApnea_har_Radial_mr_rapsres.csv"))
+
+       ##transform list to data.frame
+       exp_out_har_mrraps_re<-as.data.frame(exp_out_har_mrraps)
+
+       ##rename colnames to merge
+       setnames(exp_out_har_mrraps_re,c("beta.hat","beta.se","beta.p.value"),
+             c("b","se","pval"))
+       exp_out_har_mrraps_re$Method<-"MR RAPS"
+       exp_out_har_mrraps_re$outcome<-"SleepApnea"
+       exp_out_har_mrraps_re$exposure<-"BMI"
+       exp_out_har_mrraps_re$nsnp<-exp_out_har_mrdeft[1,"nsnp"]
+       exp_out_har_mrraps_re$Q<-"NA"
+       exp_out_har_mrraps_re$Q_df<-"NA"
+       exp_out_har_mrraps_re$Q_pval<-"NA"
+       exp_out_har_mrraps_re$intercept<-"NA"
+       exp_out_har_mrraps_re$intercept_se<-"NA"
+       exp_out_har_mrraps_re$intercept_pval<-"NA"
+       exp_out_har_mrraps_re$id.outcome<-"NA"
+       exp_out_har_mrraps_re$id.exposure<-"NA"
+       exp_out_har_mrraps_re<-exp_out_har_mrraps_re[,c("Method","outcome","exposure",                       "nsnp","b","se","pval","Q","Q_df","Q_pval","intercept",
+                                                       "intercept_se","intercept_pval",
+                                                       "id.outcome","id.exposure")]
+
+       #rbind mr results
+       exp_out_har_mr_bindres<-rbind(exp_out_har_mrsubres,exp_out_har_mrraps_re)
+       exp_out_har_mr_bindres$exp_out_har_pair="BMI_SleepApnea_har_Radial"
+       write.csv(exp_out_har_mr_bindres,file = 
+                file.path("mr_res/BMI_SleepApnea_har_Radial_mr_bindres.csv"))
+      }else{
+       exp_out_har_mrdeft<-mr(exp_out_har)
+       exp_out_har_mr_bindres[1,"Method"]<-exp_out_har_mrdeft[1,"method"]
+       exp_out_har_mr_bindres[1,"outcome"]<-exp_out_har_mrdeft[1,"outcome"]
+       exp_out_har_mr_bindres[1,"exposure"]<-exp_out_har_mrdeft[1,"exposure"]
+       exp_out_har_mr_bindres[1,"nsnp"]<-exp_out_har_mrdeft[1,"nsnp"]
+       exp_out_har_mr_bindres[1,"b"]<-exp_out_har_mrdeft[1,"b"]
+       exp_out_har_mr_bindres[1,"se"]<-exp_out_har_mrdeft[1,"se"]
+       exp_out_har_mr_bindres[1,"pval"]<-exp_out_har_mrdeft[1,"pval"]
+       exp_out_har_mr_bindres[1,"id.outcome"]<-exp_out_har_mrdeft[1,"id.outcome"]
+       exp_out_har_mr_bindres[1,"id.exposure"]<-exp_out_har_mrdeft[1,"id.exposure"]
+       exp_out_har_mr_bindres[1,"exp_out_har_pair"]="BMI_SleepApnea_har_Radial"
+       
+       #add mr.raps for weak instrumental
+       exp_out_har_mrraps<-mr.raps(b_exp = exp_out_har$beta.exposure,
+                                 b_out = exp_out_har$beta.outcome,
+                                 se_exp = exp_out_har$se.exposure,
+                                 se_out = exp_out_har$se.outcome)
+       write.csv(exp_out_har_mrraps,file= 
+                file.path("mr_res/BMI_SleepApnea_har_Radial_mr_rapsres.csv"))
+
+       ##transform list to data.frame
+       exp_out_har_mrraps_re<-as.data.frame(exp_out_har_mrraps)
+
+       ##rename colnames to merge
+       setnames(exp_out_har_mrraps_re,c("beta.hat","beta.se","beta.p.value"),
+             c("b","se","pval"))
+       exp_out_har_mrraps_re$Method<-"MR RAPS"
+       exp_out_har_mrraps_re$outcome<-"SleepApnea"
+       exp_out_har_mrraps_re$exposure<-"BMI"
+       exp_out_har_mrraps_re$nsnp<-exp_out_har_mrdeft[1,"nsnp"]
+       exp_out_har_mrraps_re$Q<-"NA"
+       exp_out_har_mrraps_re$Q_df<-"NA"
+       exp_out_har_mrraps_re$Q_pval<-"NA"
+       exp_out_har_mrraps_re$intercept<-"NA"
+       exp_out_har_mrraps_re$intercept_se<-"NA"
+       exp_out_har_mrraps_re$intercept_pval<-"NA"
+       exp_out_har_mrraps_re$id.outcome<-exp_out_har_mrdeft[1,"id.outcome"]
+       exp_out_har_mrraps_re$id.exposure<-exp_out_har_mrdeft[1,"id.exposure"]
+       exp_out_har_mrraps_re$exp_out_har_pair=as.character(
+        paste(target_name[i],"SleepApnea","har",sep = "_"))
+       exp_out_har_mrraps_re<-exp_out_har_mrraps_re[,c("Method","outcome","exposure",                       "nsnp","b","se","pval","Q","Q_df","Q_pval","intercept",
+      "intercept_se","intercept_pval","id.outcome","id.exposure","exp_out_har_pair")]
+
+       #rbind mr results
+       exp_out_har_mr_bindres<-rbind(exp_out_har_mr_bindres,exp_out_har_mrraps_re)
+       
+       write.csv(exp_out_har_mr_bindres,file = 
+                file.path("mr_res/BMI_SleepApnea_har_Radial_mr_bindres.csv"))
+      }
+      all_res<-rbind(all_res,exp_out_har_mr_bindres)
+      
+    }else{
+      exp_out_har_mr_bindres<-data.frame(Method=NA,outcome=NA,exposure=NA,nsnp=NA,            b=NA,se=NA,pval=NA,Q=NA,Q_df=NA,Q_pval=NA,intercept=NA,intercept_se=NA,                   intercept_pval=NA,id.outcome=NA,id.exposure=NA,exp_out_har_pair=NA)
+      exp_out_har_mr_bindres[1,"Method"]<-"None"
+      exp_out_har_mr_bindres[1,"outcome"]<-"SleepApnea"
+      exp_out_har_mr_bindres[1,"exposure"]<-"BMI"
+      exp_out_har_mr_bindres[1,"nsnp"]<-nrow(exp_out_har)
+      all_res<-rbind(all_res,exp_out_har_mr_bindres)
+    }
+
+#save all_res
+all_res<-all_res[-1,]
+all_res$Q_pval<-as.double(all_res$Q_pval)
+all_res$Q<-as.double(all_res$Q)
+all_res$Q_df<-as.double(all_res$Q_df)
+all_res$intercept_pval<-as.double(all_res$intercept_pval)
+all_res$intercept<-as.double(all_res$intercept)
+all_res$intercept_se<-as.double(all_res$intercept_se)
+
+all_res$BETA<-paste(round(all_res$b,3)," (",round(all_res$b-1.96*all_res$se,3),"-",round(all_res$b+1.96*all_res$se,3),")",sep = "")
+all_res$OR<-paste(round(exp(all_res$b),3)," (",round(exp(all_res$b-1.96*all_res$se),3),"-",round(exp(all_res$b+1.96*all_res$se),3),")",sep = "")
+
+write.csv(all_res,file = file.path("BMI_SleepApnea_Radialmr_bindres.csv"))
+write.xlsx(all_res,file = file.path("BMI_SleepApnea_Radialmr_bindres.xlsx"))
+```
+
+## `BMI_PlasmaPro_MR.Rmd`
+
+```{r "BMI_PlasmaPro_MR.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: BMI_PlasmaPro_MR.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(dplyr)
+library(data.table)
+library(readxl)
+library(openxlsx)
+library(TwoSampleMR)
+library(plinkbinr)
+library(ieugwasr)
+library(ggplot2)
+library(mr.raps)
+
+# ---------------------------------------------------------------------------
+# Chunk: setting
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+setwd("Path/BMIQTLSMR/")
+
+target<-c("CALCOCO2","LCT","PCSK1")
+target_name<-c("CALCOCO2","LCT","PCSK1")
+
+exposure<-read.table("Path/datasource/GWAS_data/BMI_allSNP_hg19.txt",header = T,sep = "\t")
+exposure<-subset(exposure,exposure$P<5e-8)
+
+row_file<-data.frame(exposure=NA,nsnp=NA,gene=NA,merge=NA,format_row=NA,clump_row=NA,harmonise_row=NA)
+
+# ---------------------------------------------------------------------------
+# Chunk: harmonise
+# ---------------------------------------------------------------------------
+setwd("Path/BMIQTLSMR/")
+r<-0
+for (i in 1:length(target)) {
+  
+  gene<-read.table(paste("Path/datasource/pQTL_data/ARIC/SleepApnea/",target[i],".txt",sep = ""),header = T,sep = "\t")
+
+  setnames(gene,c("Chr","A1","A2","se"),c("CHR","Effect_Allele","Other_Allele","SE"))
+
+  
+  r<-r+1
+  row_file[r,] <- NA
+  row_file[["gene"]][r] <- as.character(target_name[i])
+  row_file[["nsnp"]][r] <- nrow(gene)
+  row_file[["exposure"]][r] <- "BMI"
+  
+  #format
+  exposure_format<-format_data(exposure,
+                          type = "exposure",header = TRUE,snps = NULL,
+                          snp_col = "SNP",chr_col = "CHR",
+                          pos_col = "BP",
+                          effect_allele_col = "Effect_Allele",
+                          other_allele_col = "Other_Allele",
+                          beta_col = "BETA",
+                          se_col = "BETA_SE",eaf_col = "FREQ",
+                          pval_col = "P",samplesize_col = "N")
+  exposure_format$exposure<-"BMI"
+  row_file[["format_row"]][r]<-nrow(exposure_format)
+  
+  #clump
+  clump_temp<-exposure_format[,c("SNP","pval.exposure")]
+  pre_clump_data <- clump_temp %>% select(rsid = SNP,pval = pval.exposure)
+  pro_SleepApnea_clump <- tryCatch({
+    ld_clump_local(pre_clump_data,
+                  clump_kb = 10000,  
+                  clump_r2 = 0.001,  
+                  clump_p = 5*10^(-8),  
+                  plink_bin = get_plink_exe(),  
+                  bfile = "Path/g1000/EUR") %>% {.$rsid}
+    }, error=function(e) {})
+  row_file[["clump_row"]][r]<-length(pro_SleepApnea_clump)
+  clump <- subset(exposure_format, SNP %in% pro_SleepApnea_clump)
+  
+  #outcome/harmonise
+  out<-tryCatch({
+    format_data(gene,type = "outcome",header = TRUE,
+                      snps = clump$SNP,snp_col = "SNP",chr_col = "CHR",
+                          pos_col = "BP",
+                          effect_allele_col = "Effect_Allele",
+                          other_allele_col = "Other_Allele",
+                          beta_col = "Beta",
+                          se_col = "SE",eaf_col = "Freq",
+                          pval_col = "p")
+  },error=function(e) {})
+  if(length(out)!=0)
+    out$outcome<-as.character(target_name[i])
+  
+  if(length(out)==0){
+    row_file[["harmonise_row"]][r]<-0
+  }else{
+    exp_out_har<-harmonise_data(clump,out,action = 2) 
+    row_file[["harmonise_row"]][r]<-nrow(exp_out_har)
+    save(exp_out_har,file = 
+         file.path(paste("Path/BMIQTLSMR/harmonise_data/BMI_PlasmaPo_",
+                         as.character(target_name[i]),"_har.RData",
+                         sep = "")))
+    write.csv(exp_out_har,file = 
+         file.path(paste("Path/BMIQTLSMR/harmonise_data/BMI_PlasmaPo_",
+                         as.character(target_name[i]),"_har.csv",sep = "")))
+  }
+}
+
+#save file
+write.xlsx(row_file,"BMI_PlasmaPo_row.xlsx")
+rm(list = ls())
+
+# ---------------------------------------------------------------------------
+# Chunk: MR
+# ---------------------------------------------------------------------------
+rm(list = ls())
+
+setwd("Path/BMIQTLSMR/")
+
+combine_all_mrresults <- function (res, het, plt, sin, ao_slc = T, Exp = F, split.exposure = F, split.outcome = F) 
+{
+    requireNamespace("plyr", quietly = TRUE)
+    het <- het[, c("id.exposure", "id.outcome", "method", "Q", 
+        "Q_df", "Q_pval")]
+       sin <- sin[grep("[:0-9:]", sin$SNP), ]
+    sin$method <- "Wald ratio"
+    names(sin)[names(sin) == "p"] <- "pval"
+    names(res)[names(res) == "method"] <- "Method"
+    names(het)[names(het) == "method"] <- "Method"
+    names(sin)[names(sin) == "method"] <- "Method"
+    res <- merge(res, het, by = c("id.outcome", "id.exposure", 
+        "Method"), all.x = T)
+    res <- plyr::rbind.fill(res, sin[, c("exposure", "outcome", 
+        "id.exposure", "id.outcome", "SNP", "b", "se", "pval", 
+        "Method")])
+    if (ao_slc) {
+        ao <- available_outcomes()
+        names(ao)[names(ao) == "nsnp"] <- "nsnps.outcome.array"
+        res <- merge(res, ao[, !names(ao) %in% c("unit", "priority", 
+            "sd", "path", "note", "filename", "access", "mr")], 
+            by.x = "id.outcome", by.y = "id")
+    }
+    res$nsnp[is.na(res$nsnp)] <- 1
+    for (i in unique(res$id.outcome)) {
+        Methods <- unique(res$Method[res$id.outcome == i])
+        Methods <- Methods[Methods != "Wald ratio"]
+        for (j in unique(Methods)) {
+            res$SNP[res$id.outcome == i & res$Method == j] <- 
+              paste(res$SNP[res$id.outcome == 
+                i & res$Method == "Wald ratio"], collapse = "; ")
+        }
+    }
+    if (Exp) {
+        res$or <- exp(res$b)
+        res$or_lci95 <- exp(res$b - res$se * 1.96)
+        res$or_uci95 <- exp(res$b + res$se * 1.96)
+    }
+    plt <- plt[, c("id.outcome", "id.exposure", "egger_intercept", 
+        "se", "pval")]
+    plt$Method <- "MR Egger"
+    names(plt)[names(plt) == "egger_intercept"] <- "intercept"
+    names(plt)[names(plt) == "se"] <- "intercept_se"
+    names(plt)[names(plt) == "pval"] <- "intercept_pval"
+    res <- merge(res, plt, by = c("id.outcome", "id.exposure", 
+        "Method"), all.x = T)
+    if (split.exposure) {
+        res <- split_exposure(res)
+    }
+    if (split.outcome) {
+        res <- split_outcome(res)
+    }
+    Cols <- c("Method", "outcome", "exposure", "nsnp", "b", "se", 
+        "pval", "intercept", "intercept_se", "intercept_pval", 
+        "Q", "Q_df", "Q_pval", "consortium", "ncase", "ncontrol", 
+        "pmid", "population")
+    res <- res[, c(names(res)[names(res) %in% Cols], names(res)[which(!names(res) %in% 
+        Cols)])]
+    return(res)
+}
+
+all_res<-data.frame(Method=NA,outcome=NA,exposure=NA,nsnp=NA,b=NA,se=NA,pval=NA,Q=NA,Q_df=NA,Q_pval=NA,intercept=NA,intercept_se=NA,intercept_pval=NA,id.outcome=NA,id.exposure=NA,exp_out_har_pair=NA)
+
+target_name<-c("CALCOCO2","LCT","PCSK1")
+
+for (i in 1:length(target_name)) {
+
+  if(file.exists(paste("harmonise_data/BMI_PlasmaPo_",
+                       target_name[i],"_har.RData",sep = ""))){
+    folder_path<-paste("mr_res/BMI_PlasmaPo_",target_name[i],"/",sep = "")
+    dir.create(folder_path)
+
+    load(paste("harmonise_data/BMI_PlasmaPo_",target_name[i],"_har.RData",sep = ""))
+    
+    if(nrow(subset(exp_out_har,mr_keep==TRUE))!=0){
+      exp_out_har_mr_bindres<-data.frame(Method=NA,outcome=NA,exposure=NA,nsnp=NA,            b=NA,se=NA,pval=NA,Q=NA,Q_df=NA,Q_pval=NA,intercept=NA,intercept_se=NA,                   intercept_pval=NA,id.outcome=NA,id.exposure=NA,exp_out_har_pair=NA)
+      
+      if(nrow(subset(exp_out_har,mr_keep==TRUE))>2){
+        exp_out_har_mrdeft<-mr(exp_out_har,method_list=                               
+                              c("mr_ivw","mr_egger_regression","mr_weighted_median"))
+        exp_out_har_mrhet<-mr_heterogeneity(exp_out_har)
+        exp_out_har_mrplt<-mr_pleiotropy_test(exp_out_har)
+        exp_out_har_mrsin<-mr_singlesnp(exp_out_har)
+        exp_out_har_mrloo<-mr_leaveoneout(exp_out_har)
+
+       #plots
+       exp_out_har_scatP<-mr_scatter_plot(exp_out_har_mrdeft,exp_out_har)
+       exp_out_har_scatP
+       ggsave(exp_out_har_scatP[[1]], 
+           file=file.path(paste("mr_res/BMI_PlasmaPo_",target_name[i],
+                                "/BMI_PlasmaPo_",target_name[i],
+                                "_har_scatP.pdf",sep = "")))
+
+       exp_out_har_sinP<-mr_forest_plot(exp_out_har_mrsin)
+       exp_out_har_sinP
+       ggsave(exp_out_har_sinP[[1]], 
+           file=file.path(paste("mr_res/BMI_PlasmaPo_",target_name[i],
+                                "/BMI_PlasmaPo_",target_name[i],
+                                "_har_sinP.pdf",sep = "")))
+
+       exp_out_har_looP<-mr_leaveoneout_plot(exp_out_har_mrloo)
+       exp_out_har_looP
+       ggsave(exp_out_har_looP[[1]], 
+           file=file.path(paste("mr_res/BMI_PlasmaPo_",target_name[i],
+                                "/BMI_PlasmaPo_",target_name[i],
+                                "_har_looP.pdf",sep = "")))
+
+       exp_out_har_funnelP<-mr_funnel_plot(exp_out_har_mrsin)
+       exp_out_har_funnelP
+       ggsave(exp_out_har_funnelP[[1]], 
+           file=file.path(paste("mr_res/BMI_PlasmaPo_",target_name[i],
+                                "/BMI_PlasmaPo_",target_name[i],
+                                "_har_funnelP.pdf",sep = "")))
+
+       #combine_all_mrresults 
+       exp_out_har_mrallres<-combine_all_mrresults(res = exp_out_har_mrdeft, 
+                                           het= exp_out_har_mrhet,
+                                           plt =exp_out_har_mrplt,
+                                           sin = exp_out_har_mrsin, 
+                                           ao_slc = FALSE)
+       write.csv(exp_out_har_mrallres,file = 
+                file.path(paste("mr_res/BMI_PlasmaPo_",target_name[i],
+                                "/BMI_PlasmaPo_",target_name[i],
+                                "_har_mr_allres.csv",sep = "")))
+
+       ##subset for rbind
+       exp_out_har_mrsubres<-exp_out_har_mrallres[-which(exp_out_har_mrallres$Method==
+                                                          "Wald ratio"),]
+       exp_out_har_mrsubres<-exp_out_har_mrsubres[,c("Method","outcome","exposure","nsnp","b","se","pval","Q","Q_df","Q_pval","intercept","intercept_se","intercept_pval","id.outcome","id.exposure")]
+       write.csv(exp_out_har_mrsubres,file = 
+                file.path(paste("mr_res/BMI_PlasmaPo_",target_name[i],
+                                "/BMI_PlasmaPo_",target_name[i],
+                                "_har_mr_subres.csv",sep = "")))
+
+       #add mr.raps for weak instrumental
+       exp_out_har_mrraps<-mr.raps(b_exp = exp_out_har$beta.exposure,
+                                 b_out = exp_out_har$beta.outcome,
+                                 se_exp = exp_out_har$se.exposure,
+                                 se_out = exp_out_har$se.outcome)
+       write.csv(exp_out_har_mrraps,file= 
+                file.path(paste("mr_res/BMI_PlasmaPo_",target_name[i],
+                                "/BMI_PlasmaPo_",target_name[i],
+                                "_har_mr_rapsres.csv",sep = "")))
+
+       ##transform list to data.frame
+       exp_out_har_mrraps_re<-as.data.frame(exp_out_har_mrraps)
+
+       ##rename colnames to merge
+       setnames(exp_out_har_mrraps_re,c("beta.hat","beta.se","beta.p.value"),
+             c("b","se","pval"))
+       exp_out_har_mrraps_re$Method<-"MR RAPS"
+       exp_out_har_mrraps_re$outcome<-as.character(target_name[i])
+       exp_out_har_mrraps_re$exposure<-"BMI"
+       exp_out_har_mrraps_re$nsnp<-exp_out_har_mrdeft[1,"nsnp"]
+       exp_out_har_mrraps_re$Q<-"NA"
+       exp_out_har_mrraps_re$Q_df<-"NA"
+       exp_out_har_mrraps_re$Q_pval<-"NA"
+       exp_out_har_mrraps_re$intercept<-"NA"
+       exp_out_har_mrraps_re$intercept_se<-"NA"
+       exp_out_har_mrraps_re$intercept_pval<-"NA"
+       exp_out_har_mrraps_re$id.outcome<-"NA"
+       exp_out_har_mrraps_re$id.exposure<-"NA"
+       exp_out_har_mrraps_re<-exp_out_har_mrraps_re[,c("Method","outcome","exposure",                       "nsnp","b","se","pval","Q","Q_df","Q_pval","intercept",
+                                                       "intercept_se","intercept_pval",
+                                                       "id.outcome","id.exposure")]
+
+       #rbind mr results
+       exp_out_har_mr_bindres<-rbind(exp_out_har_mrsubres,exp_out_har_mrraps_re)
+       exp_out_har_mr_bindres$exp_out_har_pair=as.character(paste("BMI_PlasmaPo",target_name[i],"har",sep = "_"))
+       write.csv(exp_out_har_mr_bindres,file = 
+                file.path(paste("mr_res/BMI_PlasmaPo_",target_name[i],
+                                "/BMI_PlasmaPo_",target_name[i],
+                                "_har_mr_bindres.csv",sep = "")))
+      }else{
+       exp_out_har_mrdeft<-mr(exp_out_har)
+       exp_out_har_mr_bindres[1,"Method"]<-exp_out_har_mrdeft[1,"method"]
+       exp_out_har_mr_bindres[1,"outcome"]<-exp_out_har_mrdeft[1,"outcome"]
+       exp_out_har_mr_bindres[1,"exposure"]<-exp_out_har_mrdeft[1,"exposure"]
+       exp_out_har_mr_bindres[1,"nsnp"]<-exp_out_har_mrdeft[1,"nsnp"]
+       exp_out_har_mr_bindres[1,"b"]<-exp_out_har_mrdeft[1,"b"]
+       exp_out_har_mr_bindres[1,"se"]<-exp_out_har_mrdeft[1,"se"]
+       exp_out_har_mr_bindres[1,"pval"]<-exp_out_har_mrdeft[1,"pval"]
+       exp_out_har_mr_bindres[1,"id.outcome"]<-exp_out_har_mrdeft[1,"id.outcome"]
+       exp_out_har_mr_bindres[1,"id.exposure"]<-exp_out_har_mrdeft[1,"id.exposure"]
+       exp_out_har_mr_bindres[1,"exp_out_har_pair"]=as.character(
+        paste("BMI_PlasmaPo",target_name[i],"har",sep = "_"))
+       
+       #add mr.raps for weak instrumental
+       exp_out_har_mrraps<-mr.raps(b_exp = exp_out_har$beta.exposure,
+                                 b_out = exp_out_har$beta.outcome,
+                                 se_exp = exp_out_har$se.exposure,
+                                 se_out = exp_out_har$se.outcome)
+       write.csv(exp_out_har_mrraps,file= 
+                file.path(paste("mr_res/BMI_PlasmaPo_",target_name[i],
+                                "/BMI_PlasmaPo_",target_name[i],
+                                "_har_mr_rapsres.csv",sep = "")))
+
+       ##transform list to data.frame
+       exp_out_har_mrraps_re<-as.data.frame(exp_out_har_mrraps)
+
+       ##rename colnames to merge
+       setnames(exp_out_har_mrraps_re,c("beta.hat","beta.se","beta.p.value"),
+             c("b","se","pval"))
+       exp_out_har_mrraps_re$Method<-"MR RAPS"
+       exp_out_har_mrraps_re$outcome<-as.character(target_name[i])
+       exp_out_har_mrraps_re$exposure<-"BMI"
+       exp_out_har_mrraps_re$nsnp<-exp_out_har_mrdeft[1,"nsnp"]
+       exp_out_har_mrraps_re$Q<-"NA"
+       exp_out_har_mrraps_re$Q_df<-"NA"
+       exp_out_har_mrraps_re$Q_pval<-"NA"
+       exp_out_har_mrraps_re$intercept<-"NA"
+       exp_out_har_mrraps_re$intercept_se<-"NA"
+       exp_out_har_mrraps_re$intercept_pval<-"NA"
+       exp_out_har_mrraps_re$id.outcome<-exp_out_har_mrdeft[1,"id.outcome"]
+       exp_out_har_mrraps_re$id.exposure<-exp_out_har_mrdeft[1,"id.exposure"]
+       exp_out_har_mrraps_re$exp_out_har_pair=as.character(
+        paste("BMI_PlasmaPo",target_name[i],"har",sep = "_"))
+       exp_out_har_mrraps_re<-exp_out_har_mrraps_re[,c("Method","outcome","exposure",                       "nsnp","b","se","pval","Q","Q_df","Q_pval","intercept",
+      "intercept_se","intercept_pval","id.outcome","id.exposure","exp_out_har_pair")]
+
+       #rbind mr results
+       exp_out_har_mr_bindres<-rbind(exp_out_har_mr_bindres,exp_out_har_mrraps_re)
+       
+       write.csv(exp_out_har_mr_bindres,file = 
+                file.path(paste("mr_res/BMI_PlasmaPo_",target_name[i],
+                                "/BMI_PlasmaPo_",target_name[i],
+                                "_har_mr_bindres.csv",sep = "")))
+      }
+      all_res<-rbind(all_res,exp_out_har_mr_bindres)
+      
+    }else{
+      exp_out_har_mr_bindres<-data.frame(Method=NA,outcome=NA,exposure=NA,nsnp=NA,            b=NA,se=NA,pval=NA,Q=NA,Q_df=NA,Q_pval=NA,intercept=NA,intercept_se=NA,                   intercept_pval=NA,id.outcome=NA,id.exposure=NA,exp_out_har_pair=NA)
+      exp_out_har_mr_bindres[1,"Method"]<-"None"
+      exp_out_har_mr_bindres[1,"outcome"]<-target_name[i]
+      exp_out_har_mr_bindres[1,"exposure"]<-"BMI"
+      exp_out_har_mr_bindres[1,"nsnp"]<-nrow(exp_out_har)
+      all_res<-rbind(all_res,exp_out_har_mr_bindres)
+    }
+  }
+}
+
+#save all_res
+all_res<-all_res[-1,]
+all_res$Q_pval<-as.double(all_res$Q_pval)
+all_res$Q<-as.double(all_res$Q)
+all_res$Q_df<-as.double(all_res$Q_df)
+all_res$intercept_pval<-as.double(all_res$intercept_pval)
+all_res$intercept<-as.double(all_res$intercept)
+all_res$intercept_se<-as.double(all_res$intercept_se)
+
+all_res$BETA<-paste(round(all_res$b,3)," (",round(all_res$b-1.96*all_res$se,3),"-",round(all_res$b+1.96*all_res$se,3),")",sep = "")
+all_res$OR<-paste(round(exp(all_res$b),3)," (",round(exp(all_res$b-1.96*all_res$se),3),"-",round(exp(all_res$b+1.96*all_res$se),3),")",sep = "")
+
+write.csv(all_res,file = file.path("BMI_PlasmaPo_mr_bindres.csv"))
+write.xlsx(all_res,file = file.path("BMI_PlasmaPo_mr_bindres.xlsx"))
+```
+
+## `SMReQTL_bmi_code.txt`
+
+```{bash "SMReQTL_bmi_code.txt", eval=FALSE}
+# ===========================================================================
+# Source file: SMReQTL_bmi_code.txt (shell script)
+# ===========================================================================
+#blood mRNA SMR
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --gwas-summary Path/datasource/BMI_eQTL/bmi_SMR.txt --beqtl-summary Path/datasource/BMI_eQTL/Whole_Blood/Whole_Blood --maf 0.01 --out Path/datasource/BMI_eQTL/Blood_bmi --thread-num 10
+
+cat Sig_Blood_SleepApnea_gene.txt | while read line;
+do
+echo "Now extracting gene:"$line
+var=${line:0:(-1)};
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --beqtl-summary Path/datasource/eQTL_data/Whole_Blood/Whole_Blood --query 1 --probe "$var" --out Path/datasource/eQTL_data/Whole_Blood/SleepApnea/blood_"$var"
+echo "Gene "$var" has finished"
+done
+
+
+#brain mRNA SMR
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --gwas-summary Path/datasource/BMI_eQTL/bmi_SMR.txt --beqtl-summary Path/datasource/BMI_eQTL/Brain_Frontal_Cortex_BA9/Brain_Frontal_Cortex_BA9 --maf 0.01 --out Path/datasource/BMI_eQTL/Brain_bmi --thread-num 10
+
+cat Sig_Brain_SleepApnea_gene.txt | while read line;
+do
+echo "Now extracting gene:"$line
+var=${line:0:(-1)};
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --beqtl-summary Path/datasource/eQTL_data/Brain_Frontal_Cortex_BA9/Brain_Frontal_Cortex_BA9 --query 1 --probe "$var" --out Path/datasource/eQTL_data/Brain_Frontal_Cortex_BA9/SleepApnea/brain_"$var"
+echo "Gene "$var" has finished"
+done
+```
+
+## `SMReQTL_bmi_Rcode.Rmd`
+
+```{r "SMReQTL_bmi_Rcode.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: SMReQTL_bmi_Rcode.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(openxlsx)
+library(readxl)
+library(dplyr)
+library(readr)
+library(data.table)
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the blood mRNA SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/datasource/BMI_eQTL/")
+
+results<-read.delim("Blood_bmi.smr",header = TRUE,stringsAsFactors = FALSE)
+
+results<-results[which(results$probeID %in% c("ENSG00000116871","ENSG00000171055","ENSG00000076003","ENSG00000115159","ENSG00000106460","ENSG00000242435","ENSG00000241350","ENSG00000175164","ENSG00000133794","ENSG00000139428","ENSG00000110921","ENSG00000174373","ENSG00000141298","ENSG00000228782","ENSG00000169738","ENSG00000233622","ENSG00000131100","ENSG00000100395")),]
+results$BETA<-paste(round(results$b_SMR,3)," (",round(results$b_SMR-1.96*results$se_SMR,3),"-",round(results$b_SMR+1.96*results$se_SMR,3),")",sep = "")
+results$OR<-paste(round(exp(results$b_SMR),3)," (",round(exp(results$b_SMR-1.96*results$se_SMR),3),"-",round(exp(results$b_SMR+1.96*results$se_SMR),3),")",sep = "")
+write.xlsx(results,"ALL_Blood_bmi.xlsx")
+results<-subset(results,results$p_SMR<0.05)
+results<-subset(results,results$p_HEIDI>0.01)
+write.xlsx(results,"Sig_Blood_bmi.xlsx")
+
+write.table(results$probeID,"Sig_Blood_bmi_gene.txt",row.names = F,col.names = F,quote = FALSE)
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the brain mRNA SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/datasource/BMI_eQTL/")
+
+results<-read.delim("Brain_bmi.smr",header = TRUE,stringsAsFactors = FALSE)
+
+results<-results[which(results$probeID %in% c("ENSG00000171055","ENSG00000145194","ENSG00000164284","ENSG00000141458","ENSG00000267289","ENSG00000015475","ENSG00000100395")),]
+results$BETA<-paste(round(results$b_SMR,3)," (",round(results$b_SMR-1.96*results$se_SMR,3),"-",round(results$b_SMR+1.96*results$se_SMR,3),")",sep = "")
+results$OR<-paste(round(exp(results$b_SMR),3)," (",round(exp(results$b_SMR-1.96*results$se_SMR),3),"-",round(exp(results$b_SMR+1.96*results$se_SMR),3),")",sep = "")
+write.xlsx(results,"ALL_Brain_bmi.xlsx")
+results<-subset(results,results$p_SMR<0.05)
+results<-subset(results,results$p_HEIDI>0.01)
+write.xlsx(results,"Sig_Brain_bmi.xlsx")
+
+write.table(results$probeID,"Sig_Brain_bmi_gene.txt",row.names = F,col.names = F,quote = FALSE)
+```
+
+## `SMRpQTL_bmi_code.txt`
+
+```{bash "SMRpQTL_bmi_code.txt", eval=FALSE}
+# ===========================================================================
+# Source file: SMRpQTL_bmi_code.txt (shell script)
+# ===========================================================================
+#plasma protein BESD format
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --eqtl-flist Path/datasource/pQTL_data/Plasma_SleepApnea_flist.txt --make-besd --out Path/datasource/pQTL_data/Plasma_SleepApnea_PWAS_Sig
+
+#plasma protein SMR
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --gwas-summary Path/datasource/BMI_eQTL/bmi_SMR.txt --beqtl-summary Path/datasource/BMI_eQTL/Plasma_SleepApnea_PWAS_Sig --maf 0.01 --out Path/datasource/BMI_eQTL/Plasma_bmi --thread-num 10
+
+
+#brain protein BESD format
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --eqtl-flist Path/datasource/pQTL_data/Brain_SleepApnea_flist.txt --make-besd --out Path/datasource/pQTL_data/Brain_SleepApnea_PWAS_Sig
+
+#brain protein SMR
+Path/SMR/smr-1.3.1-win-x86_64/smr-1.3.1-win.exe --bfile Path/g1000/EUR --gwas-summary Path/datasource/BMI_eQTL/bmi_SMR.txt --beqtl-summary Path/datasource/BMI_eQTL/Brain_SleepApnea_PWAS_Sig --maf 0.01 --out Path/datasource/BMI_eQTL/Brain_bmi_pro --thread-num 10
+```
+
+## `SMRpQTL_bmi_Rcode.Rmd`
+
+```{r "SMRpQTL_bmi_Rcode.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: SMRpQTL_bmi_Rcode.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(openxlsx)
+library(readxl)
+library(dplyr)
+library(readr)
+library(data.table)
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the plasma protein SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/datasource/BMI_eQTL/")
+
+results<-read.delim("Plasma_bmi.smr",header = TRUE,stringsAsFactors = FALSE)
+
+results<-results[which(results$probeID %in% c("P09848","P29120","Q13137")),]
+results$BETA<-paste(round(results$b_SMR,3)," (",round(results$b_SMR-1.96*results$se_SMR,3),"-",round(results$b_SMR+1.96*results$se_SMR,3),")",sep = "")
+results$OR<-paste(round(exp(results$b_SMR),3)," (",round(exp(results$b_SMR-1.96*results$se_SMR),3),"-",round(exp(results$b_SMR+1.96*results$se_SMR),3),")",sep = "")
+results<-results[,c("probeID","ProbeChr","Gene","Probe_bp","topSNP","topSNP_chr","topSNP_bp","A1","A2","Freq","b_GWAS","se_GWAS","p_GWAS","b_eQTL","se_eQTL","p_eQTL","b_SMR","se_SMR","BETA","OR","p_SMR","p_HEIDI","nsnp_HEIDI")]
+write.xlsx(results,"ALL_Plasma_bmi.xlsx")
+results<-subset(results,results$p_SMR<0.05)
+results<-subset(results,results$p_HEIDI>0.01)
+write.xlsx(results,"Sig_Plasma_bmi.xlsx")
+
+# ---------------------------------------------------------------------------
+# Chunk: Read the brain protein SMR results
+# ---------------------------------------------------------------------------
+rm(list = ls())
+setwd("Path/datasource/BMI_eQTL/")
+
+results<-read.delim("Brain_bmi_pro.smr",header = TRUE,stringsAsFactors = FALSE)
+
+results<-results[which(results$probeID %in% c("ENSG00000106460","ENSG00000119922","ENSG00000099968")),]
+results$BETA<-paste(round(results$b_SMR,3)," (",round(results$b_SMR-1.96*results$se_SMR,3),"-",round(results$b_SMR+1.96*results$se_SMR,3),")",sep = "")
+results$OR<-paste(round(exp(results$b_SMR),3)," (",round(exp(results$b_SMR-1.96*results$se_SMR),3),"-",round(exp(results$b_SMR+1.96*results$se_SMR),3),")",sep = "")
+results<-results[,c("probeID","ProbeChr","Gene","Probe_bp","topSNP","topSNP_chr","topSNP_bp","A1","A2","Freq","b_GWAS","se_GWAS","p_GWAS","b_eQTL","se_eQTL","p_eQTL","b_SMR","se_SMR","BETA","OR","p_SMR","p_HEIDI","nsnp_HEIDI")]
+results$Gene_t<- substring(results$Gene,17,)
+write.xlsx(results,"ALL_Brain_bmi_pro.xlsx")
+results<-subset(results,results$p_SMR<0.05)
+results<-subset(results,results$p_HEIDI>0.01)
+write.xlsx(results,"Sig_Brain_bmi_pro.xlsx")
+```
+

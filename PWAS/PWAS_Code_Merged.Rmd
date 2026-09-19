@@ -1,0 +1,962 @@
+---
+title: "PWAS: proteome-wide association analysis (merged code)"
+output: html_document
+---
+
+```{r global-options, include=FALSE}
+# Code chunks are shown but not executed: the analysis needs the input files of the
+# study, which are not part of this code repository. Set eval = TRUE (or run a chunk
+# manually) after the paths below have been pointed at your own copy of the data.
+knitr::opts_chunk$set(echo = TRUE, eval = FALSE)
+```
+
+# PWAS
+
+This document merges every source file of the PWAS folder. Genetically predicted
+plasma protein levels (European reference weights) and brain protein levels (ROSMAP
+reference weights) are tested for association with obstructive sleep apnea and with
+the five overnight oximetry traits.
+
+The shell scripts run PWAS.assoc_test.R for every chromosome; the R scripts merge the
+per-chromosome output, apply the FDR correction and, for the traits that were analysed
+further, convert the pQTL data of the significant proteins into the SMR input format.
+
+## Notes on the merged code
+
+* Each section below holds one source file of this folder, and the file name is given
+  both in the section heading and in the first comment line of the chunk.
+* Every path that pointed at the analysis tree of the original workstation is rewritten
+  to a short relative path below the placeholder root `Path/`; `Path/datasource/` stands
+  for the input data, `Path/R-4.3.1/bin/` for the R interpreter and
+  `Path/SMR/smr-1.3.1-win-x86_64/` for the SMR executable. Point them at your own
+  installation before running the code.
+* The Chinese comments and chunk titles of the original scripts are given in English;
+  the date of the original document header is not part of this merged file.
+* Shell scripts are kept in their own `bash` chunks.
+
+---
+
+## `PWAS_AHI_code.txt`
+
+```{bash "PWAS_AHI_code.txt", eval=FALSE}
+# ===========================================================================
+# Source file: PWAS_AHI_code.txt (shell script)
+# ===========================================================================
+#plasma protein PWAS
+CHR=22
+until [ $CHR -lt 1 ]
+do
+Path/R-4.3.1/bin/Rscript.exe Path/PWAS/scripts/PWAS.assoc_test.R \
+--sumstats Path/datasource/GWAS_data/AHI_TWAS_format.txt \
+--weights Path/datasource/PWAS_weight/PWAS_EA/Plasma_Protein_EA_hg19.pos \
+--weights_dir Path/datasource/PWAS_weight/PWAS_EA/Plasma_Protein_weights_EA/ \
+--ref_ld_chr Path/PWAS/LDref/EUR/chr \
+--force_model enet \
+--chr ${CHR} \
+--out Path/PWAS/PWAS_by_chr/AHI_chr${CHR}.out
+let CHR-=1
+done
+
+
+#brain protein PWAS
+CHR=22
+until [ $CHR -lt 1 ]
+do
+Path/R-4.3.1/bin/Rscript.exe Path/PWAS/scripts/PWAS.assoc_test.R \
+--sumstats Path/datasource/GWAS_data/AHI_TWAS_format.txt \
+--weights Path/datasource/PWAS_weight/ROSMAP/train_weights.pos \
+--weights_dir Path/datasource/PWAS_weight/ROSMAP/ \
+--ref_ld_chr Path/PWAS/LDref/EUR/chr \
+--force_model enet \
+--chr ${CHR} \
+--out Path/PWAS/ROSMAP_PWAS_by_chr/AHI_chr${CHR}.out
+let CHR-=1
+done
+```
+
+## `PWAS_AHI_Rcode.Rmd`
+
+```{r "PWAS_AHI_Rcode.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: PWAS_AHI_Rcode.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(openxlsx)
+library(readxl)
+library(dplyr)
+library(readr)
+library(GenomicRanges)
+library(rtracklayer)
+library(data.table)
+
+# ---------------------------------------------------------------------------
+# Chunk: Merge plasma PWAS results and export
+# ---------------------------------------------------------------------------
+rm(list = ls())
+results <- tibble()
+for (chr in 1:22) {
+    results <- rbind(results, read_tsv(paste0("Path/PWAS/PWAS_by_chr/AHI_chr", chr, ".out")))
+    if(chr==6){
+        results <- rbind(results, read_tsv(paste0("Path/PWAS/PWAS_by_chr/AHI_chr6.out.MHC")))
+    }
+}
+#FDR correction
+results$PWAS.P.FDR<-NA
+results_temp<-subset(results,results$PWAS.P!=0)
+results<-results[-which(results$ID %in% results_temp$ID),]
+results_temp$PWAS.P.FDR<-p.adjust(results_temp$PWAS.P,method = "fdr",n = length(results_temp$PWAS.P))
+results<-rbind(results_temp,results)
+write.xlsx(results,"Path/PWAS/PlasmaPro_AHI_PWAS.xlsx")
+
+# ---------------------------------------------------------------------------
+# Chunk: Convert the pQTL data of significant plasma proteins into SMR format
+# ---------------------------------------------------------------------------
+rm(list = ls())
+pwas_res<-read_xlsx("Path/PWAS/PlasmaPro_AHI_PWAS.xlsx",sheet = "Sheet 1")
+#Select the significant PWAS results
+pwas_res<-subset(pwas_res,pwas_res$PWAS.P.FDR<0.05)
+#Extract the file names of the significant results
+pwas_res$file_name<- sapply(pwas_res$FILE,function(x){
+        temp <- strsplit(x, split = "//")[[1]][2]
+				return(as.character(temp))	
+				})
+pwas_res$file_name_clean<- sapply(pwas_res$file_name,function(x){
+        temp <- strsplit(x, split = ".wgt.")[[1]][1]
+				return(as.character(temp))	
+				})
+#Remove duplicated proteins
+pwas_res<-pwas_res[order(pwas_res$PWAS.P,decreasing = FALSE),]
+pwas_res<-pwas_res[!duplicated(pwas_res$ID),]
+#Extract these significant entries from the file-to-protein mapping table
+tab<-fread("Path/datasource/pQTL_data/seqid.txt")
+tab<-tab[which(tab$seqid_in_sample %in% pwas_res$file_name_clean),]
+tab1<-tab
+tab$PathOfEsd<-paste("Path/datasource/pQTL_data/ARIC/AHI/",tab$entrezgenesymbol,".txt",sep = "")
+tab$Orientation<-NA
+tab$GeneticDistance<-0
+tab<-tab[,c("chromosome_name","uniprot_id","GeneticDistance","transcription_start_site","entrezgenesymbol","Orientation","PathOfEsd")]
+colnames(tab)<-c("Chr","ProbeID","GeneticDistance","ProbeBp","Gene","Orientation","PathOfEsd")
+write.table(tab,file = file.path("Path/datasource/pQTL_data/Plasma_AHI_flist.txt"),sep = "\t",row.names = FALSE,quote = FALSE)
+
+#Process the pQTL data of the significant proteins
+for (i in 1:length(tab1$seqid_in_sample)) {
+  dat<-fread(paste("Path/datasource/pQTL_data/EA/",tab1[i,"seqid_in_sample"],".PHENO1.glm.linear",sep = ""))
+
+  dat$P<-as.double(dat$P)
+  
+  #Select the effect allele
+  dat$A2<-""
+  for (j in 1:nrow(dat)) {
+    if(dat[j,"A1"]==dat[j,"ALT"])
+      dat[j,"A2"]<-dat[j,"REF"]
+    else
+      dat[j,"A2"]<-dat[j,"ALT"]
+  }
+  dat<-dat[,c("#CHROM","ID","POS","A1","A2","A1_FREQ","BETA","SE","P")]
+  colnames(dat)<-c("Chr","SNP","Bp","A1","A2","Freq","Beta","se","p")
+  #Lift over to hg19
+  dat$Chrom<-paste("chr",dat$Chr,sep = "")
+  dt_granges<-GenomicRanges::makeGRangesFromDataFrame(
+    dat,
+    keep.extra.columns=TRUE,ignore.strand=TRUE,seqinfo=NULL,
+    seqnames.field="Chrom",start.field = "Bp",end.field = "Bp",
+    starts.in.df.are.0based = FALSE
+  )
+  ref_chain<-rtracklayer::import.chain(
+    file.path("Path/hg38ToHg19.over.chain")
+  )
+  dat_hg19<-as.data.frame(
+    rtracklayer::liftOver(dt_granges,ref_chain)
+  )
+  dat_hg19<-subset(
+    dat_hg19,
+    select = -c(group,group_name,end,width,strand)
+  )
+  dat_hg19<-dplyr::rename(
+    dat_hg19,
+    Chrom=seqnames,Pos=start
+  )
+  dat_hg19<-dat_hg19[,c("Chr","SNP","Pos","A1","A2","Freq","Beta","se","p")]
+  colnames(dat_hg19)<-c("Chr","SNP","Bp","A1","A2","Freq","Beta","se","p")
+  write.table(dat_hg19,
+              file = file.path(paste("Path/datasource/pQTL_data/ARIC/AHI/",tab1[i,"entrezgenesymbol"],".txt",sep = "")),sep = "\t",row.names = FALSE,quote = FALSE)
+}
+
+
+# ---------------------------------------------------------------------------
+# Chunk: Merge brain PWAS results and export
+# ---------------------------------------------------------------------------
+rm(list = ls())
+results <- tibble()
+for (chr in 1:22) {
+    results <- rbind(results, read_tsv(paste0("Path/PWAS/ROSMAP_PWAS_by_chr/AHI_chr", chr, ".out")))
+    if(chr==6){
+        results <- rbind(results, read_tsv(paste0("Path/PWAS/ROSMAP_PWAS_by_chr/AHI_chr6.out.MHC")))
+    }
+}
+results$ID_pro<- substring(results$ID,17,)
+#FDR correction
+results$PWAS.P.FDR<-NA
+results_temp<-subset(results,results$PWAS.P!=0)
+results<-results[-which(results$ID %in% results_temp$ID),]
+results_temp$PWAS.P.FDR<-p.adjust(results_temp$PWAS.P,method = "fdr",n = length(results_temp$PWAS.P))
+results<-rbind(results_temp,results)
+write.xlsx(results,"Path/PWAS/BrainPro_AHI_PWAS.xlsx")
+
+# ---------------------------------------------------------------------------
+# Chunk: Convert the pQTL data of significant brain proteins into SMR format
+# ---------------------------------------------------------------------------
+rm(list = ls())
+pwas_res<-read_xlsx("Path/PWAS/BrainPro_AHI_PWAS.xlsx",sheet = "Sheet 1")
+#Select the significant PWAS results
+pwas_res<-subset(pwas_res,pwas_res$PWAS.P.FDR<0.05)
+sig_pwas_file<-pwas_res$ID
+#Remove duplicated proteins
+pwas_res<-pwas_res[order(pwas_res$PWAS.P,decreasing = FALSE),]
+pwas_res<-pwas_res[!duplicated(pwas_res$ID),]
+#Extract these significant entries from the file-to-protein mapping table
+tab<-fread("Path/datasource/pQTL_data/ROSMAP/ROSMAP.for_smr.pQTL v2.txt")
+tab<-tab[which(tab$Protein_GeneSymbol %in% sig_pwas_file),]
+tab1<-tab
+tab<-tab[,c("Protein_Chr","Protein_UniProt","Protein_BP_Start","Protein_GeneSymbol")]
+tab<-tab[!duplicated(tab$Protein_UniProt),]
+tab$PathOfEsd<-paste("Path/datasource/pQTL_data/ROSMAP/AHI/",tab$Protein_GeneSymbol,".txt",sep = "")
+tab$Orientation<-NA
+tab$GeneticDistance<-0
+tab<-tab[,c("Protein_Chr","Protein_UniProt","GeneticDistance","Protein_BP_Start","Protein_GeneSymbol","Orientation","PathOfEsd")]
+colnames(tab)<-c("Chr","ProbeID","GeneticDistance","ProbeBp","Gene","Orientation","PathOfEsd")
+write.table(tab,file = file.path("Path/datasource/pQTL_data/Brain_AHI_flist.txt"),sep = "\t",row.names = FALSE,quote = FALSE)
+
+#Process the pQTL data of the significant proteins
+sig_pro<-unique(tab1$Protein_GeneSymbol)
+for (i in 1:length(sig_pro)) {
+  dat<-subset(tab1,tab1$Protein_GeneSymbol==sig_pro[i])
+  
+  dat$Freq<-NA
+  
+  dat<-dat[,c("Chr","SNP","BP","A1","A2","Freq","Beta","SE","P")]
+  colnames(dat)<-c("Chr","SNP","Bp","A1","A2","Freq","Beta","se","p")
+  
+  write.table(dat,
+              file = file.path(paste("Path/datasource/pQTL_data/ROSMAP/AHI/",sig_pro[i],".txt",sep = "")),sep = "\t",row.names = FALSE,quote = FALSE)
+}
+```
+
+## `PWAS_AvgDesat_code.txt`
+
+```{bash "PWAS_AvgDesat_code.txt", eval=FALSE}
+# ===========================================================================
+# Source file: PWAS_AvgDesat_code.txt (shell script)
+# ===========================================================================
+#plasma protein PWAS
+CHR=22
+until [ $CHR -lt 1 ]
+do
+Path/R-4.3.1/bin/Rscript.exe Path/PWAS/scripts/PWAS.assoc_test.R \
+--sumstats Path/datasource/GWAS_data/AvgDesat_TWAS_format.txt \
+--weights Path/datasource/PWAS_weight/PWAS_EA/Plasma_Protein_EA_hg19.pos \
+--weights_dir Path/datasource/PWAS_weight/PWAS_EA/Plasma_Protein_weights_EA/ \
+--ref_ld_chr Path/PWAS/LDref/EUR/chr \
+--force_model enet \
+--chr ${CHR} \
+--out Path/PWAS/PWAS_by_chr/AvgDesat_chr${CHR}.out
+let CHR-=1
+done
+
+
+#brain protein PWAS
+CHR=22
+until [ $CHR -lt 1 ]
+do
+Path/R-4.3.1/bin/Rscript.exe Path/PWAS/scripts/PWAS.assoc_test.R \
+--sumstats Path/datasource/GWAS_data/AvgDesat_TWAS_format.txt \
+--weights Path/datasource/PWAS_weight/ROSMAP/train_weights.pos \
+--weights_dir Path/datasource/PWAS_weight/ROSMAP/ \
+--ref_ld_chr Path/PWAS/LDref/EUR/chr \
+--force_model enet \
+--chr ${CHR} \
+--out Path/PWAS/ROSMAP_PWAS_by_chr/AvgDesat_chr${CHR}.out
+let CHR-=1
+done
+```
+
+## `PWAS_AvgDesat_Rcode.Rmd`
+
+```{r "PWAS_AvgDesat_Rcode.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: PWAS_AvgDesat_Rcode.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(openxlsx)
+library(readxl)
+library(dplyr)
+library(readr)
+library(GenomicRanges)
+library(rtracklayer)
+library(data.table)
+
+# ---------------------------------------------------------------------------
+# Chunk: Merge plasma PWAS results and export
+# ---------------------------------------------------------------------------
+rm(list = ls())
+results <- tibble()
+for (chr in 1:22) {
+    results <- rbind(results, read_tsv(paste0("Path/PWAS/PWAS_by_chr/AvgDesat_chr", chr, ".out")))
+    if(chr==6){
+        results <- rbind(results, read_tsv(paste0("Path/PWAS/PWAS_by_chr/AvgDesat_chr6.out.MHC")))
+    }
+}
+#FDR correction
+results$PWAS.P.FDR<-NA
+results_temp<-subset(results,results$PWAS.P!=0)
+results<-results[-which(results$ID %in% results_temp$ID),]
+results_temp$PWAS.P.FDR<-p.adjust(results_temp$PWAS.P,method = "fdr",n = length(results_temp$PWAS.P))
+results<-rbind(results_temp,results)
+write.xlsx(results,"Path/PWAS/PlasmaPro_AvgDesat_PWAS.xlsx")
+
+# ---------------------------------------------------------------------------
+# Chunk: Convert the pQTL data of significant plasma proteins into SMR format
+# ---------------------------------------------------------------------------
+rm(list = ls())
+pwas_res<-read_xlsx("Path/PWAS/PlasmaPro_AvgDesat_PWAS.xlsx",sheet = "Sheet 1")
+#Select the significant PWAS results
+pwas_res<-subset(pwas_res,pwas_res$PWAS.P.FDR<0.05)
+#Extract the file names of the significant results
+pwas_res$file_name<- sapply(pwas_res$FILE,function(x){
+        temp <- strsplit(x, split = "//")[[1]][2]
+				return(as.character(temp))	
+				})
+pwas_res$file_name_clean<- sapply(pwas_res$file_name,function(x){
+        temp <- strsplit(x, split = ".wgt.")[[1]][1]
+				return(as.character(temp))	
+				})
+#Remove duplicated proteins
+pwas_res<-pwas_res[order(pwas_res$PWAS.P,decreasing = FALSE),]
+pwas_res<-pwas_res[!duplicated(pwas_res$ID),]
+#Extract these significant entries from the file-to-protein mapping table
+tab<-fread("Path/datasource/pQTL_data/seqid.txt")
+tab<-tab[which(tab$seqid_in_sample %in% pwas_res$file_name_clean),]
+tab1<-tab
+tab$PathOfEsd<-paste("Path/datasource/pQTL_data/ARIC/AvgDesat/",tab$entrezgenesymbol,".txt",sep = "")
+tab$Orientation<-NA
+tab$GeneticDistance<-0
+tab<-tab[,c("chromosome_name","uniprot_id","GeneticDistance","transcription_start_site","entrezgenesymbol","Orientation","PathOfEsd")]
+colnames(tab)<-c("Chr","ProbeID","GeneticDistance","ProbeBp","Gene","Orientation","PathOfEsd")
+write.table(tab,file = file.path("Path/datasource/pQTL_data/Plasma_AvgDesat_flist.txt"),sep = "\t",row.names = FALSE,quote = FALSE)
+
+#Process the pQTL data of the significant proteins
+for (i in 1:length(tab1$seqid_in_sample)) {
+  dat<-fread(paste("Path/datasource/pQTL_data/EA/",tab1[i,"seqid_in_sample"],".PHENO1.glm.linear",sep = ""))
+  
+  dat$P<-as.double(dat$P)
+  
+  #Select the effect allele
+  dat$A2<-""
+  for (j in 1:nrow(dat)) {
+    if(dat[j,"A1"]==dat[j,"ALT"])
+      dat[j,"A2"]<-dat[j,"REF"]
+    else
+      dat[j,"A2"]<-dat[j,"ALT"]
+  }
+  dat<-dat[,c("#CHROM","ID","POS","A1","A2","A1_FREQ","BETA","SE","P")]
+  colnames(dat)<-c("Chr","SNP","Bp","A1","A2","Freq","Beta","se","p")
+  #Lift over to hg19
+  dat$Chrom<-paste("chr",dat$Chr,sep = "")
+  dt_granges<-GenomicRanges::makeGRangesFromDataFrame(
+    dat,
+    keep.extra.columns=TRUE,ignore.strand=TRUE,seqinfo=NULL,
+    seqnames.field="Chrom",start.field = "Bp",end.field = "Bp",
+    starts.in.df.are.0based = FALSE
+  )
+  ref_chain<-rtracklayer::import.chain(
+    file.path("Path/hg38ToHg19.over.chain")
+  )
+  dat_hg19<-as.data.frame(
+    rtracklayer::liftOver(dt_granges,ref_chain)
+  )
+  dat_hg19<-subset(
+    dat_hg19,
+    select = -c(group,group_name,end,width,strand)
+  )
+  dat_hg19<-dplyr::rename(
+    dat_hg19,
+    Chrom=seqnames,Pos=start
+  )
+  dat_hg19<-dat_hg19[,c("Chr","SNP","Pos","A1","A2","Freq","Beta","se","p")]
+  colnames(dat_hg19)<-c("Chr","SNP","Bp","A1","A2","Freq","Beta","se","p")
+  write.table(dat_hg19,
+              file = file.path(
+                paste("Path/datasource/pQTL_data/ARIC/AvgDesat/",
+                      tab1[i,"entrezgenesymbol"],".txt",sep = "")),
+              sep = "\t",row.names = FALSE,quote = FALSE)
+}
+
+
+# ---------------------------------------------------------------------------
+# Chunk: Merge brain PWAS results and export
+# ---------------------------------------------------------------------------
+rm(list = ls())
+results <- tibble()
+for (chr in 1:22) {
+    results <- rbind(results, read_tsv(paste0("Path/PWAS/ROSMAP_PWAS_by_chr/AvgDesat_chr", chr, ".out")))
+    if(chr==6){
+        results <- rbind(results, read_tsv(paste0("Path/PWAS/ROSMAP_PWAS_by_chr/AvgDesat_chr6.out.MHC")))
+    }
+}
+results$ID_pro<- substring(results$ID,17,)
+#FDR correction
+results$PWAS.P.FDR<-NA
+results_temp<-subset(results,results$PWAS.P!=0)
+results<-results[-which(results$ID %in% results_temp$ID),]
+results_temp$PWAS.P.FDR<-p.adjust(results_temp$PWAS.P,method = "fdr",n = length(results_temp$PWAS.P))
+results<-rbind(results_temp,results)
+write.xlsx(results,"Path/PWAS/BrainPro_AvgDesat_PWAS.xlsx")
+
+# ---------------------------------------------------------------------------
+# Chunk: Convert the pQTL data of significant brain proteins into SMR format
+# ---------------------------------------------------------------------------
+rm(list = ls())
+pwas_res<-read_xlsx("Path/PWAS/BrainPro_AvgDesat_PWAS.xlsx",sheet = "Sheet 1")
+#Select the significant PWAS results
+pwas_res<-subset(pwas_res,pwas_res$PWAS.P.FDR<0.05)
+sig_pwas_file<-pwas_res$ID
+#Remove duplicated proteins
+pwas_res<-pwas_res[order(pwas_res$PWAS.P,decreasing = FALSE),]
+pwas_res<-pwas_res[!duplicated(pwas_res$ID),]
+#Extract these significant entries from the file-to-protein mapping table
+tab<-fread("Path/datasource/pQTL_data/ROSMAP_pQTL/ROSMAP.for_smr.pQTL v2.txt")
+tab<-tab[which(tab$Protein_GeneSymbol %in% sig_pwas_file),]
+tab1<-tab
+tab<-tab[,c("Protein_Chr","Protein_UniProt","Protein_BP_Start","Protein_GeneSymbol")]
+tab<-tab[!duplicated(tab$Protein_UniProt),]
+tab$PathOfEsd<-paste("Path/datasource/pQTL_data/ROSMAP/AvgDesat/",tab$Protein_GeneSymbol,".txt",sep = "")
+tab$Orientation<-NA
+tab$GeneticDistance<-0
+tab<-tab[,c("Protein_Chr","Protein_UniProt","GeneticDistance","Protein_BP_Start","Protein_GeneSymbol","Orientation","PathOfEsd")]
+colnames(tab)<-c("Chr","ProbeID","GeneticDistance","ProbeBp","Gene","Orientation","PathOfEsd")
+write.table(tab,file = file.path("Path/datasource/pQTL_data/Brain_AvgDesat_flist.txt"),sep = "\t",row.names = FALSE,quote = FALSE)
+
+#Process the pQTL data of the significant proteins
+sig_pro<-unique(tab1$Protein_GeneSymbol)
+for (i in 1:length(sig_pro)) {
+  dat<-subset(tab1,tab1$Protein_GeneSymbol==sig_pro[i])
+  
+  dat$Freq<-NA
+  
+  dat<-dat[,c("Chr","SNP","BP","A1","A2","Freq","Beta","SE","P")]
+  colnames(dat)<-c("Chr","SNP","Bp","A1","A2","Freq","Beta","se","p")
+  
+  write.table(dat,
+              file = file.path(paste("Path/datasource/pQTL_data/ROSMAP/AvgDesat/",sig_pro[i],".txt",sep = "")),sep = "\t",row.names = FALSE,quote = FALSE)
+}
+```
+
+## `PWAS_AvgSpo2_code.txt`
+
+```{bash "PWAS_AvgSpo2_code.txt", eval=FALSE}
+# ===========================================================================
+# Source file: PWAS_AvgSpo2_code.txt (shell script)
+# ===========================================================================
+#plasma protein PWAS
+CHR=22
+until [ $CHR -lt 1 ]
+do
+Path/R-4.3.1/bin/Rscript.exe Path/PWAS/scripts/PWAS.assoc_test.R \
+--sumstats Path/datasource/GWAS_data/AvgSpo2_TWAS_format.txt \
+--weights Path/datasource/PWAS_weight/PWAS_EA/Plasma_Protein_EA_hg19.pos \
+--weights_dir Path/datasource/PWAS_weight/PWAS_EA/Plasma_Protein_weights_EA/ \
+--ref_ld_chr Path/PWAS/LDref/EUR/chr \
+--force_model enet \
+--chr ${CHR} \
+--out Path/PWAS/PWAS_by_chr/AvgSpo2_chr${CHR}.out
+let CHR-=1
+done
+
+
+#brain protein PWAS
+CHR=22
+until [ $CHR -lt 1 ]
+do
+Path/R-4.3.1/bin/Rscript.exe Path/PWAS/scripts/PWAS.assoc_test.R \
+--sumstats Path/datasource/GWAS_data/AvgSpo2_TWAS_format.txt \
+--weights Path/datasource/PWAS_weight/ROSMAP/train_weights.pos \
+--weights_dir Path/datasource/PWAS_weight/ROSMAP/ \
+--ref_ld_chr Path/PWAS/LDref/EUR/chr \
+--force_model enet \
+--chr ${CHR} \
+--out Path/PWAS/ROSMAP_PWAS_by_chr/AvgSpo2_chr${CHR}.out
+let CHR-=1
+done
+```
+
+## `PWAS_AvgSpo2_Rcode.Rmd`
+
+```{r "PWAS_AvgSpo2_Rcode.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: PWAS_AvgSpo2_Rcode.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(openxlsx)
+library(readxl)
+library(dplyr)
+library(readr)
+library(GenomicRanges)
+library(rtracklayer)
+library(data.table)
+
+# ---------------------------------------------------------------------------
+# Chunk: Merge plasma PWAS results and export
+# ---------------------------------------------------------------------------
+rm(list = ls())
+results <- tibble()
+for (chr in 1:22) {
+    results <- rbind(results, read_tsv(paste0("Path/PWAS/PWAS_by_chr/AvgSpo2_chr", chr, ".out")))
+    if(chr==6){
+        results <- rbind(results, read_tsv(paste0("Path/PWAS/PWAS_by_chr/AvgSpo2_chr6.out.MHC")))
+    }
+}
+#FDR correction
+results$PWAS.P.FDR<-NA
+results_temp<-subset(results,results$PWAS.P!=0)
+results<-results[-which(results$ID %in% results_temp$ID),]
+results_temp$PWAS.P.FDR<-p.adjust(results_temp$PWAS.P,method = "fdr",n = length(results_temp$PWAS.P))
+results<-rbind(results_temp,results)
+write.xlsx(results,"Path/PWAS/PlasmaPro_AvgSpo2_PWAS.xlsx")
+
+# ---------------------------------------------------------------------------
+# Chunk: Merge brain PWAS results and export
+# ---------------------------------------------------------------------------
+rm(list = ls())
+results <- tibble()
+for (chr in 1:22) {
+    results <- rbind(results, read_tsv(paste0("Path/PWAS/ROSMAP_PWAS_by_chr/AvgSpo2_chr", chr, ".out")))
+    if(chr==6){
+        results <- rbind(results, read_tsv(paste0("Path/PWAS/ROSMAP_PWAS_by_chr/AvgSpo2_chr6.out.MHC")))
+    }
+}
+results$ID_pro<- substring(results$ID,17,)
+#FDR correction
+results$PWAS.P.FDR<-NA
+results_temp<-subset(results,results$PWAS.P!=0)
+results<-results[-which(results$ID %in% results_temp$ID),]
+results_temp$PWAS.P.FDR<-p.adjust(results_temp$PWAS.P,method = "fdr",n = length(results_temp$PWAS.P))
+results<-rbind(results_temp,results)
+write.xlsx(results,"Path/PWAS/BrainPro_AvgSpo2_PWAS.xlsx")
+```
+
+## `PWAS_MinSpo2_code.txt`
+
+```{bash "PWAS_MinSpo2_code.txt", eval=FALSE}
+# ===========================================================================
+# Source file: PWAS_MinSpo2_code.txt (shell script)
+# ===========================================================================
+#plasma protein PWAS
+CHR=22
+until [ $CHR -lt 1 ]
+do
+Path/R-4.3.1/bin/Rscript.exe Path/PWAS/scripts/PWAS.assoc_test.R \
+--sumstats Path/datasource/GWAS_data/MinSpo2_TWAS_format.txt \
+--weights Path/datasource/PWAS_weight/PWAS_EA/Plasma_Protein_EA_hg19.pos \
+--weights_dir Path/datasource/PWAS_weight/PWAS_EA/Plasma_Protein_weights_EA/ \
+--ref_ld_chr Path/PWAS/LDref/EUR/chr \
+--force_model enet \
+--chr ${CHR} \
+--out Path/PWAS/PWAS_by_chr/MinSpo2_chr${CHR}.out
+let CHR-=1
+done
+
+
+#brain protein PWAS
+CHR=22
+until [ $CHR -lt 1 ]
+do
+Path/R-4.3.1/bin/Rscript.exe Path/PWAS/scripts/PWAS.assoc_test.R \
+--sumstats Path/datasource/GWAS_data/MinSpo2_TWAS_format.txt \
+--weights Path/datasource/PWAS_weight/ROSMAP/train_weights.pos \
+--weights_dir Path/datasource/PWAS_weight/ROSMAP/ \
+--ref_ld_chr Path/PWAS/LDref/EUR/chr \
+--force_model enet \
+--chr ${CHR} \
+--out Path/PWAS/ROSMAP_PWAS_by_chr/MinSpo2_chr${CHR}.out
+let CHR-=1
+done
+```
+
+## `PWAS_MinSpo2_Rcode.Rmd`
+
+```{r "PWAS_MinSpo2_Rcode.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: PWAS_MinSpo2_Rcode.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(openxlsx)
+library(readxl)
+library(dplyr)
+library(readr)
+library(GenomicRanges)
+library(rtracklayer)
+library(data.table)
+
+# ---------------------------------------------------------------------------
+# Chunk: Merge plasma PWAS results and export
+# ---------------------------------------------------------------------------
+rm(list = ls())
+results <- tibble()
+for (chr in 1:22) {
+    results <- rbind(results, read_tsv(paste0("Path/PWAS/PWAS_by_chr/MinSpo2_chr", chr, ".out")))
+    if(chr==6){
+        results <- rbind(results, read_tsv(paste0("Path/PWAS/PWAS_by_chr/MinSpo2_chr6.out.MHC")))
+    }
+}
+#FDR correction
+results$PWAS.P.FDR<-NA
+results_temp<-subset(results,results$PWAS.P!=0)
+results<-results[-which(results$ID %in% results_temp$ID),]
+results_temp$PWAS.P.FDR<-p.adjust(results_temp$PWAS.P,method = "fdr",n = length(results_temp$PWAS.P))
+results<-rbind(results_temp,results)
+write.xlsx(results,"Path/PWAS/PlasmaPro_MinSpo2_PWAS.xlsx")
+
+# ---------------------------------------------------------------------------
+# Chunk: Merge brain PWAS results and export
+# ---------------------------------------------------------------------------
+rm(list = ls())
+results <- tibble()
+for (chr in 1:22) {
+    results <- rbind(results, read_tsv(paste0("Path/PWAS/ROSMAP_PWAS_by_chr/MinSpo2_chr", chr, ".out")))
+    if(chr==6){
+        results <- rbind(results, read_tsv(paste0("Path/PWAS/ROSMAP_PWAS_by_chr/MinSpo2_chr6.out.MHC")))
+    }
+}
+results$ID_pro<- substring(results$ID,17,)
+#FDR correction
+results$PWAS.P.FDR<-NA
+results_temp<-subset(results,results$PWAS.P!=0)
+results<-results[-which(results$ID %in% results_temp$ID),]
+results_temp$PWAS.P.FDR<-p.adjust(results_temp$PWAS.P,method = "fdr",n = length(results_temp$PWAS.P))
+results<-rbind(results_temp,results)
+write.xlsx(results,"Path/PWAS/BrainPro_MinSpo2_PWAS.xlsx")
+```
+
+## `PWAS_Per90_code.txt`
+
+```{bash "PWAS_Per90_code.txt", eval=FALSE}
+# ===========================================================================
+# Source file: PWAS_Per90_code.txt (shell script)
+# ===========================================================================
+#plasma protein PWAS
+CHR=22
+until [ $CHR -lt 1 ]
+do
+Path/R-4.3.1/bin/Rscript.exe Path/PWAS/scripts/PWAS.assoc_test.R \
+--sumstats Path/datasource/GWAS_data/Per90_TWAS_format.txt \
+--weights Path/datasource/PWAS_weight/PWAS_EA/Plasma_Protein_EA_hg19.pos \
+--weights_dir Path/datasource/PWAS_weight/PWAS_EA/Plasma_Protein_weights_EA/ \
+--ref_ld_chr Path/PWAS/LDref/EUR/chr \
+--force_model enet \
+--chr ${CHR} \
+--out Path/PWAS/PWAS_by_chr/Per90_chr${CHR}.out
+let CHR-=1
+done
+
+
+#brain protein PWAS
+CHR=22
+until [ $CHR -lt 1 ]
+do
+Path/R-4.3.1/bin/Rscript.exe Path/PWAS/scripts/PWAS.assoc_test.R \
+--sumstats Path/datasource/GWAS_data/Per90_TWAS_format.txt \
+--weights Path/datasource/PWAS_weight/ROSMAP/train_weights.pos \
+--weights_dir Path/datasource/PWAS_weight/ROSMAP/ \
+--ref_ld_chr Path/PWAS/LDref/EUR/chr \
+--force_model enet \
+--chr ${CHR} \
+--out Path/PWAS/ROSMAP_PWAS_by_chr/Per90_chr${CHR}.out
+let CHR-=1
+done
+```
+
+## `PWAS_Per90_Rcode.Rmd`
+
+```{r "PWAS_Per90_Rcode.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: PWAS_Per90_Rcode.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(openxlsx)
+library(readxl)
+library(dplyr)
+library(readr)
+library(GenomicRanges)
+library(rtracklayer)
+library(data.table)
+
+# ---------------------------------------------------------------------------
+# Chunk: Merge plasma PWAS results and export
+# ---------------------------------------------------------------------------
+rm(list = ls())
+results <- tibble()
+for (chr in 1:22) {
+    results <- rbind(results, read_tsv(paste0("Path/PWAS/PWAS_by_chr/Per90_chr", chr, ".out")))
+    if(chr==6){
+        results <- rbind(results, read_tsv(paste0("Path/PWAS/PWAS_by_chr/Per90_chr6.out.MHC")))
+    }
+}
+#FDR correction
+results$PWAS.P.FDR<-NA
+results_temp<-subset(results,results$PWAS.P!=0)
+results<-results[-which(results$ID %in% results_temp$ID),]
+results_temp$PWAS.P.FDR<-p.adjust(results_temp$PWAS.P,method = "fdr",n = length(results_temp$PWAS.P))
+results<-rbind(results_temp,results)
+write.xlsx(results,"Path/PWAS/PlasmaPro_Per90_PWAS.xlsx")
+
+# ---------------------------------------------------------------------------
+# Chunk: Merge brain PWAS results and export
+# ---------------------------------------------------------------------------
+rm(list = ls())
+results <- tibble()
+for (chr in 1:22) {
+    results <- rbind(results, read_tsv(paste0("Path/PWAS/ROSMAP_PWAS_by_chr/Per90_chr", chr, ".out")))
+    if(chr==6){
+        results <- rbind(results, read_tsv(paste0("Path/PWAS/ROSMAP_PWAS_by_chr/Per90_chr6.out.MHC")))
+    }
+}
+results$ID_pro<- substring(results$ID,17,)
+#FDR correction
+results$PWAS.P.FDR<-NA
+results_temp<-subset(results,results$PWAS.P!=0)
+results<-results[-which(results$ID %in% results_temp$ID),]
+results_temp$PWAS.P.FDR<-p.adjust(results_temp$PWAS.P,method = "fdr",n = length(results_temp$PWAS.P))
+results<-rbind(results_temp,results)
+write.xlsx(results,"Path/PWAS/BrainPro_Per90_PWAS.xlsx")
+```
+
+## `PWAS_SleepApnea_code.txt`
+
+```{bash "PWAS_SleepApnea_code.txt", eval=FALSE}
+# ===========================================================================
+# Source file: PWAS_SleepApnea_code.txt (shell script)
+# ===========================================================================
+#plasma protein PWAS
+CHR=22
+until [ $CHR -lt 1 ]
+do
+Path/R-4.3.1/bin/Rscript.exe Path/PWAS/scripts/PWAS.assoc_test.R \
+--sumstats Path/datasource/GWAS_data/SleepApnea_TWAS_format.txt \
+--weights Path/datasource/PWAS_weight/PWAS_EA/Plasma_Protein_EA_hg19.pos \
+--weights_dir Path/datasource/PWAS_weight/PWAS_EA/Plasma_Protein_weights_EA/ \
+--ref_ld_chr Path/PWAS/LDref/EUR/chr \
+--force_model enet \
+--chr ${CHR} \
+--out Path/PWAS/PWAS_by_chr/SleepApnea_chr${CHR}.out
+let CHR-=1
+done
+
+
+#brain protein PWAS
+CHR=22
+until [ $CHR -lt 1 ]
+do
+Path/R-4.3.1/bin/Rscript.exe Path/PWAS/scripts/PWAS.assoc_test.R \
+--sumstats Path/datasource/GWAS_data/SleepApnea_TWAS_format.txt \
+--weights Path/datasource/PWAS_weight/ROSMAP/train_weights.pos \
+--weights_dir Path/datasource/PWAS_weight/ROSMAP/ \
+--ref_ld_chr Path/PWAS/LDref/EUR/chr \
+--force_model enet \
+--chr ${CHR} \
+--out Path/PWAS/ROSMAP_PWAS_by_chr/SleepApnea_chr${CHR}.out
+let CHR-=1
+done
+```
+
+## `PWAS_SleepApnea_Rcode.Rmd`
+
+```{r "PWAS_SleepApnea_Rcode.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: PWAS_SleepApnea_Rcode.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(openxlsx)
+library(readxl)
+library(dplyr)
+library(readr)
+library(GenomicRanges)
+library(rtracklayer)
+library(data.table)
+
+# ---------------------------------------------------------------------------
+# Chunk: Merge plasma PWAS results and export
+# ---------------------------------------------------------------------------
+rm(list = ls())
+results <- tibble()
+for (chr in 1:22) {
+    results <- rbind(results, read_tsv(paste0("Path/PWAS/PWAS_by_chr/SleepApnea_chr", chr, ".out")))
+    if(chr==6){
+        results <- rbind(results, read_tsv(paste0("Path/PWAS/PWAS_by_chr/SleepApnea_chr6.out.MHC")))
+    }
+}
+#FDR correction
+results$PWAS.P.FDR<-NA
+results_temp<-subset(results,results$PWAS.P!=0)
+results<-results[-which(results$ID %in% results_temp$ID),]
+results_temp$PWAS.P.FDR<-p.adjust(results_temp$PWAS.P,method = "fdr",n = length(results_temp$PWAS.P))
+results<-rbind(results_temp,results)
+write.xlsx(results,"Path/PWAS/PlasmaPro_SleepApnea_PWAS.xlsx")
+
+# ---------------------------------------------------------------------------
+# Chunk: Convert the pQTL data of significant plasma proteins into SMR format
+# ---------------------------------------------------------------------------
+rm(list = ls())
+pwas_res<-read_xlsx("Path/PWAS/PlasmaPro_SleepApnea_PWAS.xlsx",sheet = "Sheet 1")
+#Select the significant PWAS results
+pwas_res<-subset(pwas_res,pwas_res$PWAS.P.FDR<0.05)
+#Extract the file names of the significant results
+pwas_res$file_name<- sapply(pwas_res$FILE,function(x){
+        temp <- strsplit(x, split = "//")[[1]][2]
+				return(as.character(temp))	
+				})
+pwas_res$file_name_clean<- sapply(pwas_res$file_name,function(x){
+        temp <- strsplit(x, split = ".wgt.")[[1]][1]
+				return(as.character(temp))	
+				})
+#Remove duplicated proteins
+pwas_res<-pwas_res[order(pwas_res$PWAS.P.FDR,decreasing = FALSE),]
+pwas_res<-pwas_res[!duplicated(pwas_res$ID),]
+#Extract these significant entries from the file-to-protein mapping table
+tab<-fread("Path/datasource/pQTL_data/seqid.txt")
+tab<-tab[which(tab$seqid_in_sample %in% pwas_res$file_name_clean),]
+tab1<-tab
+tab$PathOfEsd<-paste("Path/datasource/pQTL_data/ARIC/SleepApnea/",tab$entrezgenesymbol,".txt",sep = "")
+tab$Orientation<-NA
+tab$GeneticDistance<-0
+tab<-tab[,c("chromosome_name","uniprot_id","GeneticDistance","transcription_start_site","entrezgenesymbol","Orientation","PathOfEsd")]
+colnames(tab)<-c("Chr","ProbeID","GeneticDistance","ProbeBp","Gene","Orientation","PathOfEsd")
+write.table(tab,file = file.path("Path/datasource/pQTL_data/Plasma_SleepApnea_flist.txt"),sep = "\t",row.names = FALSE,quote = FALSE)
+
+#Process the pQTL data of the significant proteins
+for (i in 1:length(tab1$seqid_in_sample)) {
+  dat<-fread(paste("Path/datasource/pQTL_data/EA/",tab1[i,"seqid_in_sample"],".PHENO1.glm.linear",sep = ""))
+  
+  dat$P<-as.double(dat$P)
+  
+  #Select the effect allele
+  dat$A2<-""
+  for (j in 1:nrow(dat)) {
+    if(dat[j,"A1"]==dat[j,"ALT"])
+      dat[j,"A2"]<-dat[j,"REF"]
+    else
+      dat[j,"A2"]<-dat[j,"ALT"]
+  }
+  dat<-dat[,c("#CHROM","ID","POS","A1","A2","A1_FREQ","BETA","SE","P")]
+  colnames(dat)<-c("Chr","SNP","Bp","A1","A2","Freq","Beta","se","p")
+  #Lift over to hg19
+  dat$Chrom<-paste("chr",dat$Chr,sep = "")
+  dt_granges<-GenomicRanges::makeGRangesFromDataFrame(
+    dat,
+    keep.extra.columns=TRUE,ignore.strand=TRUE,seqinfo=NULL,
+    seqnames.field="Chrom",start.field = "Bp",end.field = "Bp",
+    starts.in.df.are.0based = FALSE
+  )
+  ref_chain<-rtracklayer::import.chain(
+    file.path("Path/hg38ToHg19.over.chain")
+  )
+  dat_hg19<-as.data.frame(
+    rtracklayer::liftOver(dt_granges,ref_chain)
+  )
+  dat_hg19<-subset(
+    dat_hg19,
+    select = -c(group,group_name,end,width,strand)
+  )
+  dat_hg19<-dplyr::rename(
+    dat_hg19,
+    Chrom=seqnames,Pos=start
+  )
+  dat_hg19<-dat_hg19[,c("Chr","SNP","Pos","A1","A2","Freq","Beta","se","p")]
+  colnames(dat_hg19)<-c("Chr","SNP","Bp","A1","A2","Freq","Beta","se","p")
+  write.table(dat_hg19,
+              file = file.path(paste("Path/datasource/pQTL_data/ARIC/SleepApnea/",tab1[i,"entrezgenesymbol"],".txt",sep = "")),sep = "\t",row.names = FALSE,quote = FALSE)
+}
+
+
+# ---------------------------------------------------------------------------
+# Chunk: Merge brain PWAS results and export
+# ---------------------------------------------------------------------------
+rm(list = ls())
+results <- tibble()
+for (chr in 1:22) {
+    results <- rbind(results, read_tsv(paste0("Path/PWAS/ROSMAP_PWAS_by_chr/SleepApnea_chr", chr, ".out")))
+    if(chr==6){
+        results <- rbind(results,read_tsv(paste0("Path/PWAS/ROSMAP_PWAS_by_chr/SleepApnea_chr6.out.MHC")))
+    }
+}
+results$ID_pro<- substring(results$ID,17,)
+#FDR correction
+results$PWAS.P.FDR<-NA
+results_temp<-subset(results,results$PWAS.P!=0)
+results<-results[-which(results$ID %in% results_temp$ID),]
+results_temp$PWAS.P.FDR<-p.adjust(results_temp$PWAS.P,method = "fdr",n = length(results_temp$PWAS.P))
+results<-rbind(results_temp,results)
+write.xlsx(results,"Path/PWAS/BrainPro_SleepApnea_PWAS.xlsx")
+
+# ---------------------------------------------------------------------------
+# Chunk: Convert the pQTL data of significant brain proteins into SMR format
+# ---------------------------------------------------------------------------
+rm(list = ls())
+pwas_res<-read_xlsx("Path/PWAS/BrainPro_SleepApnea_PWAS.xlsx",sheet = "Sheet 1")
+#Select the significant PWAS results
+pwas_res<-subset(pwas_res,pwas_res$PWAS.P.FDR<0.05)
+sig_pwas_file<-pwas_res$ID
+#Remove duplicated proteins
+pwas_res<-pwas_res[order(pwas_res$PWAS.P,decreasing = FALSE),]
+pwas_res<-pwas_res[!duplicated(pwas_res$ID),]
+#Extract these significant entries from the file-to-protein mapping table
+tab<-fread("Path/datasource/pQTL_data/ROSMAP/ROSMAP.for_smr.pQTL v2.txt")
+tab<-tab[which(tab$Protein_GeneSymbol %in% sig_pwas_file),]
+tab1<-tab
+tab<-tab[,c("Protein_Chr","Protein_UniProt","Protein_BP_Start","Protein_GeneSymbol")]
+tab<-tab[!duplicated(tab$Protein_UniProt),]
+tab$PathOfEsd<-paste("Path/datasource/pQTL_data/ROSMAP/SleepApnea/",tab$Protein_GeneSymbol,".txt",sep = "")
+tab$Orientation<-NA
+tab$GeneticDistance<-0
+tab<-tab[,c("Protein_Chr","Protein_UniProt","GeneticDistance","Protein_BP_Start","Protein_GeneSymbol","Orientation","PathOfEsd")]
+colnames(tab)<-c("Chr","ProbeID","GeneticDistance","ProbeBp","Gene","Orientation","PathOfEsd")
+write.table(tab,file = file.path("Path/datasource/pQTL_data/Brain_SleepApnea_flist.txt"),sep = "\t",row.names = FALSE,quote = FALSE)
+
+#Process the pQTL data of the significant proteins
+sig_pro<-unique(tab1$Protein_GeneSymbol)
+for (i in 1:length(sig_pro)) {
+  dat<-subset(tab1,tab1$Protein_GeneSymbol==sig_pro[i])
+  
+  dat$Freq<-NA
+  
+  dat<-dat[,c("Chr","SNP","BP","A1","A2","Freq","Beta","SE","P")]
+  colnames(dat)<-c("Chr","SNP","Bp","A1","A2","Freq","Beta","se","p")
+  
+  write.table(dat,
+              file = file.path(paste("Path/datasource/pQTL_data/ROSMAP/SleepApnea/",sig_pro[i],".txt",sep = "")),sep = "\t",row.names = FALSE,quote = FALSE)
+}
+```
+

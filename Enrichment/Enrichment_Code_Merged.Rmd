@@ -1,0 +1,164 @@
+---
+title: "Functional enrichment of the prioritized genes (merged code)"
+output: html_document
+---
+
+```{r global-options, include=FALSE}
+# Code chunks are shown but not executed: the analysis needs the input files of the
+# study, which are not part of this code repository. Set eval = TRUE (or run a chunk
+# manually) after the paths below have been pointed at your own copy of the data.
+knitr::opts_chunk$set(echo = TRUE, eval = FALSE)
+```
+
+# Enrichment
+
+This document merges the enrichment script of the Enrichment folder. The prioritized
+blood and brain genes are submitted to gene ontology (GO) over-representation analysis
+and the enriched terms are displayed as bubble plots faceted by GO category.
+
+The GO result tables are read from the Excel files that the enrichment analysis
+produced, and the terms that are highlighted in the manuscript are printed in bold.
+
+## Notes on the merged code
+
+* Each section below holds one source file of this folder, and the file name is given
+  both in the section heading and in the first comment line of the chunk.
+* Every path that pointed at the analysis tree of the original workstation is rewritten
+  to a short relative path below the placeholder root `Path/`; `Path/datasource/` stands
+  for the input data, `Path/R-4.3.1/bin/` for the R interpreter and
+  `Path/SMR/smr-1.3.1-win-x86_64/` for the SMR executable. Point them at your own
+  installation before running the code.
+* The Chinese comments and chunk titles of the original scripts are given in English;
+  the date of the original document header is not part of this merged file.
+* Shell scripts are kept in their own `bash` chunks.
+
+---
+
+## `SA_ProGene_enrichment_Rcode.Rmd`
+
+```{r "SA_ProGene_enrichment_Rcode.Rmd", eval=FALSE}
+# ===========================================================================
+# Source file: SA_ProGene_enrichment_Rcode.Rmd (R code)
+# ===========================================================================
+# ---------------------------------------------------------------------------
+# Chunk: setup
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+library(org.Hs.eg.db)
+library(clusterProfiler)
+library(enrichplot)
+library(ggplot2)
+library(dplyr)
+library(ggnewscale)
+library(DOSE)
+library(readxl)
+library(openxlsx)
+library(AnnotationDbi)
+library(ggtext)
+
+# ---------------------------------------------------------------------------
+# Chunk: Blood GO and KEGG enrichment analysis
+# ---------------------------------------------------------------------------
+rm(list = ls())
+#Set the working directory
+setwd("Path/Enrichment/")
+
+bold_terms <- c("regulation of macroautophagy","regulation of vacuole organization","organic hydroxy compound catabolic process","neuron cellular homeostasis","macroautophagy","regulation of autophagy","ATPase binding","oxidoreductase activity, acting on CH-OH group of donors")   
+# replace with the actual pathway names
+
+#bubble plot
+GO_enrich_df<-read_excel("GO_SA_Blood.xlsx",sheet = "Sheet 1")
+GO_enrich_df$type_order <- factor(GO_enrich_df$Description,
+                                  levels = rev(sort(unique(GO_enrich_df$Description))))
+
+#jpeg(file = "SA_Blood_bubble.jpg",width=40,height=35,units="cm",res = 600)
+jpeg(file = "SA_Blood_bubble.jpg",width=36,height=35,units="cm",res = 600)
+# set the factor level order of Category (in the order in which they appear in the data)
+GO_enrich_df$Category <- factor(GO_enrich_df$Category, levels = c("BP", "MF"))
+plot2<-ggplot(data = GO_enrich_df,aes(x=Count,y=type_order))+
+  geom_point(aes(size=Count,color=p.adjust))+
+  scale_size_continuous(
+    range = c(6, 9),  # adjust here: the first value is the smallest bubble size, the second value is the largest bubble size
+    name = "Count",  # legend title
+    breaks = c(1,2,3)
+  ) +
+  scale_color_gradient(low = "#FD8D62",high = "darkblue",
+                       breaks = c(0.02, 0.03, 0.04),  # specify the tick values
+                       guide = guide_colorbar(reverse = TRUE)  # reverse the order in which the legend is displayed
+                       )+
+  #geom_text(aes(label=geneID),hjust=1.2,size=4.5)+
+  scale_x_continuous(limits = c(0.8, 3.2),breaks = c(1,2,3))+
+  # add a discrete y-axis scale that prints the selected pathway names in bold
+  scale_y_discrete(labels = function(x) ifelse(x %in% bold_terms, paste0("<b>", x, "</b>"), x)) +
+  labs(color=expression(p.adjust,size="Count"),
+       x="Gene Number",y="",title = "")+
+  theme_bw()+
+  theme(axis.text = element_text(color = "black",size = 17),
+        axis.title = element_text(color = "black",size = 18),
+        legend.text = element_text(color = "black",size = 17),
+        legend.title = element_text(color = "black",size = 18),
+        strip.text = element_text(face = "bold", size = 15),  # facet title
+        strip.background = element_rect(fill = "grey90"),     # facet title background
+        # remove the background grid lines
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        # use element_markdown so that the y-axis labels support HTML bold text
+        axis.text.y = element_markdown(color = "black", size = 17)) +
+  facet_grid(Category ~ ., scales = "free_y", space = "free_y")
+print(plot2)
+dev.off()
+
+# ---------------------------------------------------------------------------
+# Chunk: Brain GO and KEGG enrichment analysis
+# ---------------------------------------------------------------------------
+rm(list = ls())
+#Set the working directory
+setwd("Path/Enrichment/")
+
+bold_terms <- c("negative regulation of macroautophagy","regulation of vacuole organization","activation of cysteine-type endopeptidase activity involved in apoptotic process","negative regulation of autophagy","protein targeting to mitochondrion","apoptotic mitochondrial changes","positive regulation of cysteine-type endopeptidase activity involved in apoptotic process","establishment of protein localization to mitochondrion","protein localization to mitochondrion","positive regulation of cysteine-type endopeptidase activity","lysosomal transport","epithelial cell apoptotic process","positive regulation of endopeptidase activity","regulation of cysteine-type endopeptidase activity involved in apoptotic process","positive regulation of peptidase activity","vacuolar transport","regulation of macroautophagy","mitochondrial transport","regulation of cysteine-type endopeptidase activity","negative regulation of cellular catabolic process","vacuole organization","late endosome membrane","late endosome")   
+# replace with the actual pathway names
+
+#bubble plot
+GO_enrich_df<-read_excel("GO_SA_Brain.xlsx",sheet = "Sheet 1")
+GO_enrich_df$type_order <- factor(GO_enrich_df$Description,
+                                  levels = rev(sort(unique(GO_enrich_df$Description))))
+
+#jpeg(file = "SA_Brain_bubble.jpg",width=38,height=28,units="cm",res = 600)
+jpeg(file = "SA_Brain_bubble.jpg",width=43,height=28,units="cm",res = 600)
+# set the factor level order of Category (in the order in which they appear in the data)
+GO_enrich_df$Category <- factor(GO_enrich_df$Category, levels = c("BP", "CC"))
+plot2<-ggplot(data = GO_enrich_df,aes(x=Count,y=type_order))+
+  geom_point(aes(size=Count,color=p.adjust))+
+  scale_size_continuous(
+    range = c(7, 9),  # adjust here: the first value is the smallest bubble size, the second value is the largest bubble size
+    name = "Count",  # legend title
+    breaks = c(1,2,3)
+  ) +
+  scale_color_gradient(low = "#FD8D62",high = "darkblue",
+                       breaks = c(0.02, 0.03, 0.04),  # specify the tick values
+                       guide = guide_colorbar(reverse = TRUE)  # reverse the order in which the legend is displayed
+                       )+
+  #geom_text(aes(label=geneID),hjust=1.2,size=4.5)+
+  scale_x_continuous(limits = c(0.8, 3.2),breaks = c(1,2,3))+
+  # add a discrete y-axis scale that prints the selected pathway names in bold
+  scale_y_discrete(labels = function(x) ifelse(x %in% bold_terms, paste0("<b>", x, "</b>"), x)) +
+  labs(color=expression(p.adjust,size="Count"),
+       x="Gene Number",y="",title = "")+
+  theme_bw()+
+  theme(axis.text = element_text(color = "black",size = 18),
+        axis.title = element_text(color = "black",size = 20),
+        legend.text = element_text(color = "black",size = 18),
+        legend.title = element_text(color = "black",size = 19),
+        strip.text = element_text(face = "bold", size = 16),  # facet title
+        strip.background = element_rect(fill = "grey90"),     # facet title background
+        # remove the background grid lines
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        # use element_markdown so that the y-axis labels support HTML bold text
+        axis.text.y = element_markdown(color = "black", size = 18)) +
+  facet_grid(Category ~ ., scales = "free_y", space = "free_y")
+print(plot2)
+dev.off()
+```
+
