@@ -24,7 +24,7 @@ resources. Two additional sections repeat the key analyses with body mass index
 (BMI) taken into account and describe the functional enrichment and the
 methylation regulation of the prioritized signals.
 
-# The folders and what they contain
+The folders and what they contain
 
 The folders are numbered by the order in which the analyses are run.
 
@@ -63,7 +63,7 @@ The folders are numbered by the order in which the analyses are run.
                              the prioritized signals (mQTL against OSA, mQTL
                              against gene expression and mQTL against protein).
 
-# The merged code documents
+The merged code documents
 
 Every folder contains one merged R Markdown document that collects all analysis
 scripts of that folder:
@@ -89,14 +89,14 @@ chunk, after the paths have been pointed at your own copy of the data. Each
 folder also has its own README.txt that explains the folder and lists the purpose
 of every code chunk.
 
-# Path convention used in the merged documents
+Path convention used in the merged documents
 
 The original scripts refer to the analysis tree of the workstation on which they
 were written. In the merged documents all of those paths are rewritten to short
 relative paths below the placeholder root Path/. Point Path/ at your own data
 tree before running the code.
 
-# Software used
+Software used
 
    - FUSION (fusion_twas-master, FUSION.assoc_test.R) with plink and the 1000
      Genomes European LD reference panel
@@ -106,7 +106,7 @@ tree before running the code.
      org.Hs.eg.db, openxlsx, readxl, data.table, dplyr and ggplot2
    - plink 1.90 (through plinkbinr) for the LD clumping of the instruments
 
-# How to run the pipeline
+How to run the pipeline
 
    1. Rebuild the data tree below Path/ (see the table in section 4) and adjust
       the R interpreter and the SMR executable paths if your installation differs.
@@ -120,7 +120,7 @@ tree before running the code.
       per-chromosome or per-probe files) and then the R chunks that collect and
       filter the results.
 
-# Notes
+Notes
 
    - Every merged document ends with the analysis code as it was run; the file
      paths, the Chinese comments and the document dates are the only content that
